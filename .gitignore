@@ -1,0 +1,38 @@
+# Dart and Flutter tooling
+.dart_tool/
+.packages
+.pub/
+build/
+coverage/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Logs and local environment
+*.log
+.env
+.env.*
+android/local.properties
+android/.gradle/
+android/.kotlin/
+
+# Generated platform files
+**/ephemeral/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+
+# Accidental nested Flutter workspace artifacts
+lib/.dart_tool/
+lib/.flutter-plugins-dependencies
+lib/pubspec.lock
+
+# Local screenshots and temporary diagnostics
+flutter_01.png
+flutter_01.log

@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:goat_app/models/app_snapshot.dart';
 import 'package:goat_app/models/parsed_diet_item.dart';
 import 'package:goat_app/features/voice_entry/voice_entry_sheet.dart';
@@ -91,7 +94,213 @@ class _FakeNutritionRepository implements NutritionRepository {
   }
 }
 
+class _FakeSpeechToText extends stt.SpeechToText {
+  _FakeSpeechToText() : super.withMethodChannel();
+
+  bool emitListening = true;
+  bool emitPrematureTerminal = false;
+  bool emitDoneAfterStart = false;
+  String? partialOnStart;
+  String? resultOnStop;
+  int listenCalls = 0;
+  bool _listening = false;
+  stt.SpeechStatusListener? _onStatus;
+  stt.SpeechResultListener? _onResult;
+  stt.SpeechSoundLevelChange? _onSoundLevel;
+  stt.SpeechListenOptions? lastOptions;
+
+  @override
+  bool get isListening => _listening;
+
+  @override
+  Future<bool> initialize({
+    stt.SpeechErrorListener? onError,
+    stt.SpeechStatusListener? onStatus,
+    debugLogging = false,
+    Duration finalTimeout = stt.SpeechToText.defaultFinalTimeout,
+    List<stt.SpeechConfigOption>? options,
+  }) async {
+    _onStatus = onStatus;
+    return true;
+  }
+
+  @override
+  Future<List<stt.LocaleName>> locales() async => [
+    stt.LocaleName('zh_CN', 'Chinese'),
+  ];
+
+  @override
+  Future<stt.LocaleName?> systemLocale() async =>
+      stt.LocaleName('zh_CN', 'Chinese');
+
+  @override
+  Future<void> listen({
+    stt.SpeechResultListener? onResult,
+    Duration? listenFor,
+    Duration? pauseFor,
+    String? localeId,
+    stt.SpeechSoundLevelChange? onSoundLevelChange,
+    cancelOnError = false,
+    partialResults = true,
+    onDevice = false,
+    stt.ListenMode listenMode = stt.ListenMode.confirmation,
+    sampleRate = 0,
+    stt.SpeechListenOptions? listenOptions,
+  }) async {
+    listenCalls++;
+    _onResult = onResult;
+    _onSoundLevel = onSoundLevelChange;
+    lastOptions = listenOptions;
+    if (emitPrematureTerminal) {
+      _onStatus?.call('notListening');
+      return;
+    }
+    if (emitListening) {
+      _listening = true;
+      _onStatus?.call('listening');
+    }
+    if (partialOnStart != null) emitPartial(partialOnStart!);
+    if (emitDoneAfterStart) {
+      Future<void>.microtask(() => _onStatus?.call('done'));
+    }
+  }
+
+  void emitSoundLevel(double level) => _onSoundLevel?.call(level);
+
+  void emitPartial(String text) {
+    _onResult?.call(
+      SpeechRecognitionResult([
+        SpeechRecognitionWords(text, null, -1),
+      ], ResultType.partial.value),
+    );
+  }
+
+  @override
+  Future<void> stop() async {
+    _listening = false;
+    final text = resultOnStop;
+    if (text != null) {
+      _onResult?.call(
+        SpeechRecognitionResult([
+          SpeechRecognitionWords(text, null, -1),
+        ], ResultType.finalResult.value),
+      );
+    }
+    _onStatus?.call('done');
+  }
+
+  @override
+  Future<void> cancel() async {
+    _listening = false;
+    _onStatus?.call('notListening');
+  }
+}
+
 void main() {
+  test('speech startup terminal status is not recognized success', () async {
+    final engine = _FakeSpeechToText()..emitPrematureTerminal = true;
+    final service = DeviceSpeechRecognitionService(
+      speech: engine,
+      startupTimeout: const Duration(milliseconds: 40),
+    );
+    final states = <SpeechState>[];
+    final subscription = service.stateStream.listen(states.add);
+
+    await service.initialize();
+    await service.startListening(onPartial: (_) {});
+
+    expect(states, contains(SpeechState.error));
+    expect(states, isNot(contains(SpeechState.recognized)));
+    await subscription.cancel();
+    await service.dispose();
+  });
+
+  test('listening state only follows platform listening callback', () async {
+    final engine = _FakeSpeechToText();
+    final service = DeviceSpeechRecognitionService(speech: engine);
+    final states = <SpeechState>[];
+    final subscription = service.stateStream.listen(states.add);
+
+    await service.initialize();
+    await service.startListening(onPartial: (_) {});
+
+    expect(states, contains(SpeechState.listening));
+    expect(engine.lastOptions?.listenMode, stt.ListenMode.dictation);
+    expect(engine.lastOptions?.pauseFor, const Duration(seconds: 5));
+    await subscription.cancel();
+    await service.dispose();
+  });
+
+  test('platform done preserves partial text without empty success', () async {
+    final engine = _FakeSpeechToText()
+      ..emitDoneAfterStart = true
+      ..partialOnStart = '早餐两个鸡蛋';
+    final service = DeviceSpeechRecognitionService(speech: engine);
+    final states = <SpeechState>[];
+    final partials = <String>[];
+    final subscription = service.stateStream.listen(states.add);
+
+    await service.initialize();
+    final start = service.startListening(onPartial: partials.add);
+    await Future<void>.delayed(Duration.zero);
+    engine.emitPartial('早餐两个鸡蛋');
+    await start;
+    await Future<void>.delayed(Duration.zero);
+
+    expect(partials, contains('早餐两个鸡蛋'));
+    expect(states, contains(SpeechState.recognized));
+    await subscription.cancel();
+    await service.dispose();
+  });
+
+  test('manual stop returns final text after finalizing', () async {
+    final engine = _FakeSpeechToText()..resultOnStop = '早餐两个鸡蛋';
+    final service = DeviceSpeechRecognitionService(speech: engine);
+    final states = <SpeechState>[];
+    final subscription = service.stateStream.listen(states.add);
+
+    await service.initialize();
+    await service.startListening(onPartial: (_) {});
+    final result = await service.stopListening();
+
+    expect(result.text, '早餐两个鸡蛋');
+    expect(states, contains(SpeechState.finalizing));
+    await subscription.cancel();
+    await service.dispose();
+  });
+
+  test('late callbacks after cancel do not update the session', () async {
+    final engine = _FakeSpeechToText();
+    final service = DeviceSpeechRecognitionService(speech: engine);
+    final states = <SpeechState>[];
+    final subscription = service.stateStream.listen(states.add);
+
+    await service.initialize();
+    await service.startListening(onPartial: (_) {});
+    await service.cancel();
+    engine.emitPartial('迟到的结果');
+
+    expect(states.last, SpeechState.idle);
+    expect(states, isNot(contains(SpeechState.recognized)));
+    await subscription.cancel();
+    await service.dispose();
+  });
+
+  test('concurrent starts create only one speech session', () async {
+    final engine = _FakeSpeechToText();
+    final service = DeviceSpeechRecognitionService(speech: engine);
+
+    await service.initialize();
+    await Future.wait([
+      service.startListening(onPartial: (_) {}),
+      service.startListening(onPartial: (_) {}),
+    ]);
+
+    expect(engine.listenCalls, 1);
+    await service.cancel();
+    await service.dispose();
+  });
+
   test('parsed diet item accepts numeric strings and defaults', () {
     final item = ParsedDietItem.fromJson({
       'name': '牛奶',

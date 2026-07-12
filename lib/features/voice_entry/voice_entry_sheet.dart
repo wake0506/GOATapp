@@ -57,7 +57,12 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
   bool _isSaving = false;
 
   bool get _isListening => _speechState == SpeechState.listening;
-  bool get _isBusy => _isSaving || _speechState == SpeechState.parsing;
+  bool get _isBusy =>
+      _isSaving ||
+      _speechState == SpeechState.parsing ||
+      _speechState == SpeechState.requestingPermission ||
+      _speechState == SpeechState.initializing ||
+      _speechState == SpeechState.finalizing;
 
   @override
   void initState() {
@@ -69,6 +74,10 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
           if (state == SpeechState.recognized &&
               _textController.text.trim().isEmpty) {
             _error = '没有识别到语音，请靠近麦克风再试一次，或直接输入文字';
+          }
+          if (state == SpeechState.error &&
+              _textController.text.trim().isEmpty) {
+            _error = '语音识别启动或运行失败，请重试；也可以直接输入文字';
           }
         });
       }

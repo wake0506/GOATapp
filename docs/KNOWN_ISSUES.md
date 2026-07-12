@@ -41,3 +41,13 @@ This file is updated with command results after the refactor and final quality c
 - Training data remains an atomic `user_profiles.training_data` JSON payload. Deleting a training session or exercise set persists the updated payload; separate server-side training tombstones are not used in this phase.
 - DeepSeek keys are supplied only through `--dart-define`; no local key is documented or committed.
 - Debug APK size is not a release APK size guarantee.
+
+## Speech recognition verification status
+
+- The speech service now uses an incrementing session ID and ignores callbacks from stale or cancelled sessions.
+- `SpeechState.listening` is emitted only after the platform reports raw `listening`; the return of `speech.listen()` is not treated as confirmation.
+- Premature `notListening`/`done` during startup becomes an error and never becomes an empty successful recognition.
+- Debug builds log session ID, elapsed time, raw status, raw error code/permanence, final-result status, partial-text presence, sound-level receipt, and stop/cancel intent without logging full food text.
+- Voice sessions use dictation mode, a five-second pause window, and a thirty-second maximum window; no automatic retry loop is used.
+- Fake speech-engine tests cover premature terminal status, platform listening confirmation, partial fallback, manual stop, stale callbacks, and concurrent starts.
+- Physical Android and browser microphone verification remains pending because no real device is currently available. Passing unit/widget tests do not prove microphone hardware behavior.

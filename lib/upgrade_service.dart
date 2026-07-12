@@ -6,7 +6,8 @@ import 'package:path_provider/path_provider.dart';
 
 class UpgradeService {
   // 替换成你自己的 GitHub Raw 链接
-  static const String versionUrl = "https://raw.githubusercontent.com/wake0506/GOATapp/main/version.json";
+  static const String versionUrl =
+      "https://raw.githubusercontent.com/wake0506/GOATapp/main/version.json";
 
   static Future<void> checkUpdate(BuildContext context) async {
     try {
@@ -25,11 +26,15 @@ class UpgradeService {
         _showUpdateDialog(context, data['apkUrl'], data['updateLog']);
       }
     } catch (e) {
-      print("检查更新失败: $e");
+      debugPrint("检查更新失败: $e");
     }
   }
 
-  static void _showUpdateDialog(BuildContext context, String apkUrl, String log) {
+  static void _showUpdateDialog(
+    BuildContext context,
+    String apkUrl,
+    String log,
+  ) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -37,7 +42,10 @@ class UpgradeService {
         title: Text("发现新版本"),
         content: Text(log),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text("以后再说")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text("以后再说"),
+          ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
@@ -56,10 +64,14 @@ class UpgradeService {
     String path = "${tempDir!.path}/temp_update.apk";
 
     // 2. 执行下载
-    print("开始下载...");
-    await Dio().download(url, path, onReceiveProgress: (count, total) {
-      print("下载进度: ${(count / total * 100).toStringAsFixed(0)}%");
-    });
+    debugPrint("开始下载...");
+    await Dio().download(
+      url,
+      path,
+      onReceiveProgress: (count, total) {
+        debugPrint("下载进度: ${(count / total * 100).toStringAsFixed(0)}%");
+      },
+    );
 
     // 自动安装插件尚未接入；当前先保留下载能力，避免阻塞项目构建。
     debugPrint('安装包已下载到: $path');

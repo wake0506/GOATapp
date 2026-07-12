@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goat_app/exercise_catalog.dart';
-import 'package:goat_app/main.dart' show FoodItem, SetRecord, TrainingExercise, TrainingSession;
+import 'package:goat_app/main.dart'
+    show FoodItem, SetRecord, TrainingExercise, TrainingSession;
 
 void main() {
   test('食物数据序列化后保留营养与单位信息', () {
@@ -34,7 +35,10 @@ void main() {
         TrainingExercise(
           exerciseName: '杠铃平板卧推',
           bodyPart: '胸部',
-          sets: [SetRecord(weight: 60, reps: 8), SetRecord(weight: 60, reps: 8)],
+          sets: [
+            SetRecord(weight: 60, reps: 8),
+            SetRecord(weight: 60, reps: 8),
+          ],
         ),
       ],
     );
@@ -47,7 +51,13 @@ void main() {
 
   test('动作库覆盖主要部位和多种器械类型', () {
     expect(exerciseCatalog.length, greaterThanOrEqualTo(140));
-    expect(exerciseCatalog.map((exercise) => exercise.bodyPart).toSet(), containsAll(exerciseBodyParts));
-    expect(exerciseCatalog.map((exercise) => exercise.equipment).toSet(), containsAll(['徒手', '自由重量', '器械', '绳索', '壶铃']));
+    expect(
+      exerciseCatalog.map((exercise) => exercise.bodyPart).toSet(),
+      containsAll(exerciseBodyParts),
+    );
+    expect(
+      exerciseCatalog.map((exercise) => exercise.equipment).toSet(),
+      containsAll(['徒手', '自由重量', '器械', '绳索', '壶铃']),
+    );
   });
 }

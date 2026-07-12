@@ -19,3 +19,11 @@ Baseline commit: `ff57304` (`Update GOAT app statistics and exercise catalog`)
 
 This file is updated with command results after the refactor and final quality checks.
 
+## Phase 1 verification update
+
+- Nested generated files under `lib/` were removed because they shadowed the root package configuration. `flutter analyze --no-pub` now resolves Supabase, speech, and permission packages correctly.
+- `dart format --output=none --set-exit-if-changed lib test`: passed.
+- `flutter test --no-pub`: passed, including model compatibility, namespace migration, parser safety, duplicate request protection, and voice preview/confirm behavior.
+- `flutter build web --debug --no-pub`: passed; Web output was generated under `build/web`.
+- `flutter analyze --no-pub`: no errors; remaining output is legacy page lint/info such as `withOpacity`, async BuildContext warnings, and unused old page fields.
+- `flutter build apk --debug --no-pub`: timed out after 180 seconds while Gradle/Java was active. No new debug APK was produced. Existing release output was not modified.

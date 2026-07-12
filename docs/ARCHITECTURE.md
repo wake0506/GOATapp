@@ -11,7 +11,6 @@
 
 ## Data flow
 
-User actions write to a namespaced local snapshot first. Cloud synchronization is best effort, bounded by timeouts, and reconciles deletions instead of only upserting current rows. Guest data is isolated from authenticated data and is merged by stable record ID only after a successful authenticated merge.
+User actions write to a namespaced local snapshot first. Cloud synchronization is best effort, bounded by timeouts, and upserts current rows plus only the IDs and dates in the persisted `PendingCloudDeletes` queue. A queue entry is removed only after the corresponding cloud delete succeeds; an empty or incomplete snapshot never implies deletion. Guest data is isolated from authenticated data and is cleared only after the merged authenticated snapshot uploads successfully.
 
 Voice input follows `idle -> requestingPermission -> initializing -> listening -> finalizing -> recognized -> parsing -> preview -> saving`. The parser returns DTOs; only an explicit confirmation writes records through a repository.
-

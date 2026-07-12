@@ -63,7 +63,15 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
   void initState() {
     super.initState();
     _speechSubscription = widget.speechService.stateStream.listen((state) {
-      if (mounted) setState(() => _speechState = state);
+      if (mounted) {
+        setState(() {
+          _speechState = state;
+          if (state == SpeechState.recognized &&
+              _textController.text.trim().isEmpty) {
+            _error = '没有识别到语音，请靠近麦克风再试一次，或直接输入文字';
+          }
+        });
+      }
     });
   }
 

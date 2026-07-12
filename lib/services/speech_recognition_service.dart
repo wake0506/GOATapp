@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -101,7 +102,11 @@ class DeviceSpeechRecognitionService implements SpeechRecognitionService {
           if (status == 'listening') _emit(SpeechState.listening);
           if (status == 'notListening' || status == 'done') {
             if (_finalResult?.isCompleted == false) {
-              _emit(SpeechState.finalizing);
+              final text = _finalText.isNotEmpty ? _finalText : _partialText;
+              _finalResult?.complete(
+                SpeechResult(text: text, isFinal: _finalText.isNotEmpty),
+              );
+              _emit(SpeechState.recognized);
             }
           }
         },
@@ -218,6 +223,7 @@ class DeviceSpeechRecognitionService implements SpeechRecognitionService {
       if (values.any((locale) => locale.localeId == id)) return id;
     }
     final system = await _speech.systemLocale();
+    if (kIsWeb) return 'zh-CN';
     return system?.localeId;
   }
 

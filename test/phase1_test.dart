@@ -11,6 +11,7 @@ import 'package:goat_app/repositories/nutrition_repository.dart';
 import 'package:goat_app/services/local_storage_service.dart';
 import 'package:goat_app/services/nutrition_ai_service.dart';
 import 'package:goat_app/services/speech_recognition_service.dart';
+import 'package:goat_app/models/pending_cloud_deletes.dart';
 
 class _FakeClient extends http.BaseClient {
   final String body;
@@ -137,6 +138,62 @@ void main() {
 
     expect(merged.foods, hasLength(1));
     expect(merged.foods.single.name, '账号名称');
+  });
+
+  test('empty snapshot has no cloud deletion requests', () {
+    final snapshot = AppSnapshot.empty();
+
+    expect(snapshot.pendingCloudDeletes.isEmpty, isTrue);
+    expect(snapshot.toJson()['pendingCloudDeletes'], isA<Map>());
+  });
+
+  test('only explicitly deleted remote ids enter the queue', () {
+    const queue = PendingCloudDeletes(
+      foodIds: {'food-1'},
+      dietRecordIds: {'diet-1'},
+    );
+
+    expect(queue.foodIds, contains('food-1'));
+    expect(queue.foodIds, isNot(contains('food-2')));
+    expect(queue.dietRecordIds, contains('diet-1'));
+  });
+
+  test('failed cloud deletion keeps the pending queue', () {
+    const queue = PendingCloudDeletes(foodIds: {'food-1'});
+    const failedResult = PendingCloudDeletes.empty();
+
+    expect(queue.without(failedResult).foodIds, contains('food-1'));
+  });
+
+  test('successful cloud deletion clears only processed ids', () {
+    const queue = PendingCloudDeletes(foodIds: {'food-1', 'food-2'});
+    const processed = PendingCloudDeletes(foodIds: {'food-1'});
+
+    expect(queue.without(processed).foodIds, {'food-2'});
+  });
+
+  test('deletion queues are isolated when guest data is merged', () {
+    final account = AppSnapshot.fromJson({
+      'pendingCloudDeletes': {
+        'foodIds': ['account-food'],
+      },
+    });
+    final guest = AppSnapshot.fromJson({
+      'pendingCloudDeletes': {
+        'dietRecordIds': ['guest-diet'],
+      },
+    });
+
+    final merged = account.merge(guest);
+
+    expect(merged.pendingCloudDeletes.foodIds, {'account-food'});
+    expect(merged.pendingCloudDeletes.dietRecordIds, {'guest-diet'});
+  });
+
+  test('old snapshots without a deletion queue remain readable', () {
+    final snapshot = AppSnapshot.fromJson({'foods': []});
+
+    expect(snapshot.pendingCloudDeletes.isEmpty, isTrue);
   });
 
   test(

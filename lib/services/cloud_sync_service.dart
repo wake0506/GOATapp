@@ -6,13 +6,14 @@ import '../models/app_snapshot.dart';
 import '../models/consumed_record.dart';
 import '../models/exercise_record.dart';
 import '../models/food_item.dart';
+import '../models/pending_cloud_deletes.dart';
 
 class CloudSyncService {
   final SupabaseClient client;
 
   CloudSyncService(this.client);
 
-  Future<void> syncSnapshot({
+  Future<PendingCloudDeletes> syncSnapshot({
     required User user,
     required AppSnapshot snapshot,
   }) async {
@@ -52,7 +53,7 @@ class CloudSyncService {
             },
           )
           .toList(),
-      localIds: snapshot.foods.map((e) => e.id).toSet(),
+      pendingIds: snapshot.pendingCloudDeletes.foodIds,
     );
 
     await _syncTable<ConsumedRecord>(
@@ -75,7 +76,7 @@ class CloudSyncService {
             },
           )
           .toList(),
-      localIds: snapshot.consumed.map((e) => e.id).toSet(),
+      pendingIds: snapshot.pendingCloudDeletes.dietRecordIds,
     );
 
     await _syncTable<ExerciseRecord>(
@@ -94,7 +95,7 @@ class CloudSyncService {
             },
           )
           .toList(),
-      localIds: snapshot.exercises.map((e) => e.id).toSet(),
+      pendingIds: snapshot.pendingCloudDeletes.exerciseRecordIds,
     );
 
     final trackingRows = <Map<String, dynamic>>[];
@@ -110,46 +111,33 @@ class CloudSyncService {
     if (trackingRows.isNotEmpty) {
       await client.from('daily_tracking').upsert(trackingRows);
     }
-    final remoteTracking = await client
-        .from('daily_tracking')
-        .select('date')
-        .eq('user_id', user.id);
-    final staleDates = remoteTracking
-        .map<String>((row) => row['date'].toString())
-        .where((date) => !dates.contains(date))
-        .toList();
-    if (staleDates.isNotEmpty) {
+    final pendingDates = snapshot.pendingCloudDeletes.trackingDates.toList();
+    if (pendingDates.isNotEmpty) {
       await client
           .from('daily_tracking')
           .delete()
           .eq('user_id', user.id)
-          .inFilter('date', staleDates);
+          .inFilter('date', pendingDates);
     }
+
+    return snapshot.pendingCloudDeletes;
   }
 
   Future<void> _syncTable<T>({
     required String table,
     required User user,
     required List<Map<String, dynamic>> localRows,
-    required Set<String> localIds,
+    required Set<String> pendingIds,
   }) async {
     if (localRows.isNotEmpty) {
       await client.from(table).upsert(localRows);
     }
-    final remoteRows = await client
-        .from(table)
-        .select('id')
-        .eq('user_id', user.id);
-    final staleIds = remoteRows
-        .map<String>((row) => row['id'].toString())
-        .where((id) => !localIds.contains(id))
-        .toList();
-    if (staleIds.isNotEmpty) {
+    if (pendingIds.isNotEmpty) {
       await client
           .from(table)
           .delete()
           .eq('user_id', user.id)
-          .inFilter('id', staleIds);
+          .inFilter('id', pendingIds.toList());
     }
   }
 

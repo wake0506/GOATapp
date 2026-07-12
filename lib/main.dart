@@ -17,6 +17,7 @@ import 'models/statistics_period.dart';
 import 'models/training.dart';
 import 'models/app_snapshot.dart';
 import 'models/parsed_diet_item.dart';
+import 'models/pending_cloud_deletes.dart';
 import 'features/voice_entry/voice_entry_sheet.dart';
 import 'repositories/nutrition_repository.dart';
 import 'services/cloud_sync_service.dart';
@@ -107,6 +108,7 @@ class _MainTabControllerState extends State<MainTabController>
   String? _activeUserId;
   StreamSubscription<AuthState>? _authSubscription;
   bool _cloudSyncPending = false;
+  bool _guestMergePending = false;
   String _dailyAiTip = "正在为您生成专属健康建议...";
   bool _isAiTipLoading = false;
   DateTime _calendarMonth = DateTime.now();
@@ -167,6 +169,7 @@ class _MainTabControllerState extends State<MainTabController>
   Map<String, int> dailyWater = {};
   Map<String, double> dailyWeight = {};
   List<String> searchHistory = [];
+  PendingCloudDeletes _pendingCloudDeletes = const PendingCloudDeletes.empty();
 
   double targetP = 150, targetC = 200, targetF = 60, targetKcal = 2000;
   int resetHour = 0;
@@ -225,6 +228,7 @@ class _MainTabControllerState extends State<MainTabController>
     await _mergeGuestDataIfNeeded();
     await _loadLocalData();
     if (mounted) setState(() {});
+    if (_activeUserId != null) unawaited(_connectAndSyncCloud());
   }
 
   // 🌟 AI 建议获取函数
@@ -307,7 +311,8 @@ class _MainTabControllerState extends State<MainTabController>
     final userData = _storage!.load(_activeNamespace) ?? AppSnapshot.empty();
     final merged = userData.merge(guest);
     await _storage!.save(_activeNamespace, merged);
-    await _storage!.clearNamespace(_storage!.namespaceForUser(null));
+    _guestMergePending = true;
+    _cloudSyncPending = true;
   }
 
   Future<void> _connectAndSyncCloud() async {
@@ -319,6 +324,9 @@ class _MainTabControllerState extends State<MainTabController>
         await supabase.auth.signInAnonymously().timeout(authTimeout);
       }
       await _syncWithCloud().timeout(syncTimeout);
+      if (supabase.auth.currentUser?.isAnonymous == false) {
+        await _saveData();
+      }
     } on TimeoutException {
       debugPrint('云端连接超时，当前继续使用本地数据');
     } catch (e) {
@@ -342,10 +350,17 @@ class _MainTabControllerState extends State<MainTabController>
     final user = supabase.auth.currentUser;
     if (user == null || user.isAnonymous) return;
 
+    final snapshot = _snapshotFromState();
     try {
-      await _cloudSyncService
-          .syncSnapshot(user: user, snapshot: _snapshotFromState())
+      final processedDeletes = await _cloudSyncService
+          .syncSnapshot(user: user, snapshot: snapshot)
           .timeout(const Duration(seconds: 15));
+      _pendingCloudDeletes = _pendingCloudDeletes.without(processedDeletes);
+      await _storage?.save(_activeNamespace, _snapshotFromState());
+      if (_guestMergePending && _storage != null) {
+        await _storage!.clearNamespace(_storage!.namespaceForUser(null));
+        _guestMergePending = false;
+      }
       _cloudSyncPending = false;
     } catch (e) {
       _cloudSyncPending = true;
@@ -395,6 +410,7 @@ class _MainTabControllerState extends State<MainTabController>
     training: List.unmodifiable(allTrainingSessions),
     water: Map.unmodifiable(dailyWater),
     weight: Map.unmodifiable(dailyWeight),
+    pendingCloudDeletes: _pendingCloudDeletes,
   );
 
   void _applySnapshot(AppSnapshot snapshot) {
@@ -419,7 +435,26 @@ class _MainTabControllerState extends State<MainTabController>
       allTrainingSessions = [...snapshot.training];
       dailyWater = {...snapshot.water};
       dailyWeight = {...snapshot.weight};
+      _pendingCloudDeletes = snapshot.pendingCloudDeletes;
     });
+  }
+
+  void _queueFoodDelete(String id) {
+    _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
+      foodIds: {..._pendingCloudDeletes.foodIds, id},
+    );
+  }
+
+  void _queueDietDelete(String id) {
+    _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
+      dietRecordIds: {..._pendingCloudDeletes.dietRecordIds, id},
+    );
+  }
+
+  void _queueExerciseDelete(String id) {
+    _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
+      exerciseRecordIds: {..._pendingCloudDeletes.exerciseRecordIds, id},
+    );
   }
 
   @override
@@ -624,8 +659,10 @@ class _MainTabControllerState extends State<MainTabController>
                           session.date,
                           existingSession: session,
                         );
-                      if (val == 'delete')
+                      if (val == 'delete') {
                         setState(() => allTrainingSessions.remove(session));
+                        _saveData();
+                      }
                     },
                     itemBuilder: (context) => [
                       const PopupMenuItem(value: 'edit', child: Text("重命名")),
@@ -658,8 +695,10 @@ class _MainTabControllerState extends State<MainTabController>
                   motion: const ScrollMotion(),
                   children: [
                     SlidableAction(
-                      onPressed: (_) =>
-                          setState(() => ex.sets.removeAt(setIndex)),
+                      onPressed: (_) {
+                        setState(() => ex.sets.removeAt(setIndex));
+                        _saveData();
+                      },
                       backgroundColor: Colors.redAccent,
                       foregroundColor: Colors.white,
                       icon: Icons.delete,
@@ -4089,6 +4128,7 @@ class _MainTabControllerState extends State<MainTabController>
                         CustomSlidableAction(
                           onPressed: (ctx) {
                             setState(() => allExerciseItems.remove(e));
+                            _queueExerciseDelete(e.id);
                             _saveData();
                           },
                           backgroundColor: Colors.redAccent,
@@ -4621,7 +4661,8 @@ class _MainTabControllerState extends State<MainTabController>
                                               setState(() {
                                                 foodDatabase.remove(f);
                                               });
-                                              _saveLocalPreferencesOnly();
+                                              _queueFoodDelete(f.id);
+                                              _saveData();
                                               setModalState(() {});
                                             },
                                             backgroundColor: Colors.redAccent,
@@ -5366,6 +5407,7 @@ class _MainTabControllerState extends State<MainTabController>
                               CustomSlidableAction(
                                 onPressed: (ctx) {
                                   setState(() => allConsumedItems.remove(item));
+                                  _queueDietDelete(item.id);
                                   _saveData();
                                   items.remove(item);
                                   setPopupState(() {});

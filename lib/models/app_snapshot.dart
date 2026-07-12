@@ -2,6 +2,7 @@ import 'consumed_record.dart';
 import 'exercise_record.dart';
 import 'food_item.dart';
 import 'json_value.dart';
+import 'pending_cloud_deletes.dart';
 import 'training.dart';
 
 class AppSnapshot {
@@ -24,6 +25,7 @@ class AppSnapshot {
   final List<TrainingSession> training;
   final Map<String, int> water;
   final Map<String, double> weight;
+  final PendingCloudDeletes pendingCloudDeletes;
 
   const AppSnapshot({
     required this.gender,
@@ -45,6 +47,7 @@ class AppSnapshot {
     required this.training,
     required this.water,
     required this.weight,
+    this.pendingCloudDeletes = const PendingCloudDeletes.empty(),
   });
 
   factory AppSnapshot.empty() => AppSnapshot(
@@ -67,6 +70,7 @@ class AppSnapshot {
     training: const [],
     water: const {},
     weight: const {},
+    pendingCloudDeletes: const PendingCloudDeletes.empty(),
   );
 
   bool get hasData =>
@@ -98,6 +102,7 @@ class AppSnapshot {
     'training': training.map((e) => e.toJson()).toList(),
     'water': water,
     'weight': weight,
+    'pendingCloudDeletes': pendingCloudDeletes.toJson(),
   };
 
   factory AppSnapshot.fromJson(Map<String, dynamic> json) => AppSnapshot(
@@ -124,6 +129,9 @@ class AppSnapshot {
     training: _objects(json['training']).map(TrainingSession.fromJson).toList(),
     water: _intMap(json['water']),
     weight: _doubleMap(json['weight']),
+    pendingCloudDeletes: PendingCloudDeletes.fromJson(
+      json['pendingCloudDeletes'],
+    ),
   );
 
   AppSnapshot merge(AppSnapshot other) => AppSnapshot(
@@ -148,6 +156,7 @@ class AppSnapshot {
     training: _mergeById(training, other.training, (e) => e.id),
     water: {...other.water, ...water},
     weight: {...other.weight, ...weight},
+    pendingCloudDeletes: pendingCloudDeletes.merge(other.pendingCloudDeletes),
   );
 }
 

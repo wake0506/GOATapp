@@ -120,6 +120,9 @@ create index if not exists water_intake_records_updated_idx on public.water_inta
 create index if not exists body_weight_logs_updated_idx on public.body_weight_logs (user_id, updated_at);
 create index if not exists training_sessions_updated_idx on public.training_sessions (user_id, updated_at);
 create index if not exists sync_tombstones_updated_idx on public.sync_tombstones (user_id, updated_at);
+create index if not exists client_operations_nutrition_lease_idx
+  on public.client_operations (user_id, operation_id, claimed_at)
+  where entity_type = 'nutrition-ai' and response is null;
 
 select public.goat_add_check_if_missing('user_profiles', 'user_profiles_weight_range',
   'current_weight >= 20 and current_weight <= 300');

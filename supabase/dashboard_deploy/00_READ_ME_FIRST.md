@@ -4,6 +4,11 @@
 `supabase/migrations/` 和 `supabase/functions/nutrition-ai/` 仍是源码真相，
 本目录不替代它们。本轮只生成和审查部署文件，不执行远程部署。
 
+本 v3 包按生产预检结果处理：`pg_policies.permissive` 按文本比较，Policy
+命令使用 `ALL`；`user_profiles.training_data` 可为 text 或 jsonb；
+`client_operations` 使用 `claimed_at` 实现两分钟租约。07 不创建或替换
+`delete_user()`，账号注销需单独安全审计。
+
 ## 已确认的数据基线
 
 部署后必须保留以下数据：

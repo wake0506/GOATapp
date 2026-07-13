@@ -25,14 +25,14 @@ order by e.table_name;
 
 with expected(table_name, column_name, expected_type) as (
   values
-    ('user_profiles', 'training_data', 'jsonb'),
     ('user_profiles', 'current_weight', 'numeric'),
     ('daily_tracking', 'water_ml', 'integer'),
     ('daily_tracking', 'weight_kg', 'numeric'),
     ('water_intake_records', 'recorded_at', 'timestamp with time zone'),
     ('water_intake_records', 'amount_ml', 'integer'),
     ('body_weight_logs', 'weight_kg', 'numeric'),
-    ('client_operations', 'operation_id', 'text')
+    ('client_operations', 'operation_id', 'text'),
+    ('client_operations', 'claimed_at', 'timestamp with time zone')
 )
 select 'column:' || e.table_name || '.' || e.column_name as check_name,
        case when c.column_name is null then 'FAIL'
@@ -112,9 +112,15 @@ with expected(table_name, column_name, command, non_ai_guard) as (
     ('chat_history', 'user_id', 'UPDATE', false),
     ('chat_history', 'user_id', 'DELETE', false)
 ), policy_text as (
-  select p.tablename, p.cmd, p.permissive,
+  select p.tablename,
+    upper(trim(coalesce(p.cmd, ''))) as cmd,
+    upper(trim(coalesce(p.permissive, ''))) as permissive,
     regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g') as qual_text,
-    regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text
+    regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text,
+    case when regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') = ''
+      then regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g')
+      else regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g')
+    end as effective_check
   from pg_policies p
   where p.schemaname = 'public'
 )
@@ -125,23 +131,24 @@ select 'policy:' || e.table_name || ':' || e.command as check_name,
             when exists (
               select 1 from policy_text p
               where p.tablename = e.table_name
-                and p.permissive = true
-                and p.cmd in (e.command, '*')
+                and p.permissive = 'PERMISSIVE'
+                and p.cmd in (e.command, 'ALL')
                 and (
                   (e.command = 'SELECT' and
                    (position('auth.uid=' || e.column_name in p.qual_text) > 0
                     or position(e.column_name || '=auth.uid' in p.qual_text) > 0))
                   or (e.command = 'INSERT' and
-                   position('auth.uid=' || e.column_name in p.check_text) > 0
-                   and (not e.non_ai_guard or position('entity_type<>''nutrition-ai''' in p.check_text) > 0))
+                   (position('auth.uid=' || e.column_name in p.effective_check) > 0
+                    or position(e.column_name || '=auth.uid' in p.effective_check) > 0)
+                   and (not e.non_ai_guard or position('entity_type<>''nutrition-ai''' in p.effective_check) > 0))
                   or (e.command = 'UPDATE' and
                    (position('auth.uid=' || e.column_name in p.qual_text) > 0
                     or position(e.column_name || '=auth.uid' in p.qual_text) > 0)
-                   and (position('auth.uid=' || e.column_name in p.check_text) > 0
-                    or position(e.column_name || '=auth.uid' in p.check_text) > 0)
+                   and (position('auth.uid=' || e.column_name in p.effective_check) > 0
+                    or position(e.column_name || '=auth.uid' in p.effective_check) > 0)
                    and (not e.non_ai_guard or
                         (position('entity_type<>''nutrition-ai''' in p.qual_text) > 0
-                         and position('entity_type<>''nutrition-ai''' in p.check_text) > 0)))
+                         and position('entity_type<>''nutrition-ai''' in p.effective_check) > 0)))
                   or (e.command = 'DELETE' and
                    (position('auth.uid=' || e.column_name in p.qual_text) > 0
                     or position(e.column_name || '=auth.uid' in p.qual_text) > 0)
@@ -156,7 +163,8 @@ select 'policy:ai_usage_daily:write_denied' as check_name,
        case when exists (
          select 1 from pg_policies
          where schemaname = 'public' and tablename = 'ai_usage_daily'
-           and cmd in ('INSERT', 'UPDATE', 'DELETE', '*')
+           and upper(trim(coalesce(permissive, ''))) = 'PERMISSIVE'
+           and upper(trim(coalesce(cmd, ''))) in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
        ) then 'FAIL' else 'PASS' end as status,
        'ordinary authenticated users have no direct write policy' as details;
 
@@ -164,7 +172,8 @@ select 'policy:ai_usage_daily:select_own' as check_name,
        case when exists (
          select 1 from pg_policies
          where schemaname = 'public' and tablename = 'ai_usage_daily'
-           and permissive = true and cmd in ('SELECT', '*')
+           and upper(trim(coalesce(permissive, ''))) = 'PERMISSIVE'
+           and upper(trim(coalesce(cmd, ''))) in ('SELECT', 'ALL')
            and (
              position('auth.uid=user_id' in
                regexp_replace(lower(coalesce(qual, '')), '[[:space:]()]', '', 'g')) > 0
@@ -178,17 +187,74 @@ select 'policy:client_operations:nutrition_ai_write_guard' as check_name,
        case when exists (
          select 1 from pg_policies
          where schemaname = 'public' and tablename = 'client_operations'
-           and cmd in ('INSERT', 'UPDATE', 'DELETE', '*')
+           and upper(trim(coalesce(permissive, ''))) = 'PERMISSIVE'
+           and upper(trim(coalesce(cmd, ''))) in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
            and (
-             (cmd in ('INSERT', 'UPDATE', '*') and
+             (upper(trim(coalesce(cmd, ''))) in ('INSERT', 'UPDATE', 'ALL') and
               position('entity_type<>''nutrition-ai''' in
-                regexp_replace(lower(coalesce(with_check, '')), '[[:space:]()]', '', 'g')) = 0)
-             or (cmd in ('UPDATE', 'DELETE', '*') and
+                case when regexp_replace(lower(coalesce(with_check, '')), '[[:space:]()]', '', 'g') = ''
+                  then regexp_replace(lower(coalesce(qual, '')), '[[:space:]()]', '', 'g')
+                  else regexp_replace(lower(coalesce(with_check, '')), '[[:space:]()]', '', 'g') end) = 0)
+             or (upper(trim(coalesce(cmd, ''))) in ('UPDATE', 'DELETE', 'ALL') and
               position('entity_type<>''nutrition-ai''' in
                 regexp_replace(lower(coalesce(qual, '')), '[[:space:]()]', '', 'g')) = 0)
            )
        ) then 'FAIL' else 'PASS' end as status,
        'nutrition-ai rows require server RPCs' as details;
+
+-- No safe policy may mask another permissive policy. ALL is applicable to each
+-- command, and an empty with_check falls back to the policy qual expression.
+with policy_text as (
+  select p.tablename,
+    upper(trim(coalesce(p.cmd, ''))) as cmd,
+    upper(trim(coalesce(p.permissive, ''))) as permissive,
+    regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g') as qual_text,
+    regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text
+  from pg_policies p where p.schemaname = 'public'
+), expected(table_name, column_name, non_ai_guard) as (
+  values
+    ('user_profiles', 'id', false), ('food_dictionary', 'user_id', false),
+    ('diet_logs', 'user_id', false), ('exercise_logs', 'user_id', false),
+    ('daily_tracking', 'user_id', false), ('water_intake_records', 'user_id', false),
+    ('body_weight_logs', 'user_id', false), ('training_sessions', 'user_id', false),
+    ('sync_tombstones', 'user_id', false), ('client_operations', 'user_id', true),
+    ('chat_history', 'user_id', false)
+)
+select 'policy:' || e.table_name || ':no_broad_permissive' as check_name,
+       case when not exists (
+         select 1 from policy_text p
+         where p.tablename = e.table_name and p.permissive = 'PERMISSIVE'
+           and (
+             (p.cmd in ('SELECT', 'ALL') and not (
+               position('auth.uid=' || e.column_name in p.qual_text) > 0
+               or position(e.column_name || '=auth.uid' in p.qual_text) > 0))
+             or (p.cmd in ('INSERT', 'ALL') and not (
+               (position('auth.uid=' || e.column_name in
+                 case when p.check_text = '' then p.qual_text else p.check_text end) > 0
+                or position(e.column_name || '=auth.uid' in
+                 case when p.check_text = '' then p.qual_text else p.check_text end) > 0)
+               and (not e.non_ai_guard or position('entity_type<>''nutrition-ai''' in
+                 case when p.check_text = '' then p.qual_text else p.check_text end) > 0)))
+             or (p.cmd in ('UPDATE', 'ALL') and not (
+               (position('auth.uid=' || e.column_name in p.qual_text) > 0
+                or position(e.column_name || '=auth.uid' in p.qual_text) > 0)
+               and (position('auth.uid=' || e.column_name in
+                 case when p.check_text = '' then p.qual_text else p.check_text end) > 0
+                or position(e.column_name || '=auth.uid' in
+                 case when p.check_text = '' then p.qual_text else p.check_text end) > 0)
+               and (not e.non_ai_guard or
+                 (position('entity_type<>''nutrition-ai''' in p.qual_text) > 0
+                  and position('entity_type<>''nutrition-ai''' in
+                    case when p.check_text = '' then p.qual_text else p.check_text end) > 0))))
+             or (p.cmd in ('DELETE', 'ALL') and not (
+               (position('auth.uid=' || e.column_name in p.qual_text) > 0
+                or position(e.column_name || '=auth.uid' in p.qual_text) > 0)
+               and (not e.non_ai_guard or position('entity_type<>''nutrition-ai''' in p.qual_text) > 0)))
+           )
+       ) then 'PASS' else 'FAIL' end as status,
+       'every applicable PERMISSIVE policy must be own-row safe' as details
+from expected e
+order by e.table_name;
 
 -- 4. Constraints must exist and be validated, not merely present as NOT VALID.
 with expected(table_name, constraint_name) as (
@@ -244,7 +310,8 @@ with expected(index_name) as (
     ('food_dictionary_updated_idx'), ('diet_logs_updated_idx'),
     ('exercise_logs_updated_idx'), ('daily_tracking_updated_idx'),
     ('water_intake_records_updated_idx'), ('body_weight_logs_updated_idx'),
-    ('training_sessions_updated_idx'), ('sync_tombstones_updated_idx')
+    ('training_sessions_updated_idx'), ('sync_tombstones_updated_idx'),
+    ('client_operations_nutrition_lease_idx')
 )
 select 'index:' || e.index_name as check_name,
        case when i.indexname is null then 'FAIL' else 'PASS' end as status,
@@ -289,6 +356,41 @@ select 'rpc:consume_ai_quota:fixed_signature' as check_name,
                  then 'PASS' else 'REVIEW' end as status,
        'old overload may remain only with execute revoked from client roles' as details;
 
+with old_rpc as (
+  select to_regprocedure('public.consume_ai_quota(uuid,date,integer)') as oid
+)
+select 'rpc:old_consume_ai_quota:public_execute' as check_name,
+       case when o.oid is null then 'PASS'
+            when exists (
+              select 1 from pg_proc p
+              cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+              where p.oid = o.oid and a.grantee = 0 and a.privilege_type = 'EXECUTE'
+            ) then 'FAIL' else 'PASS' end as status,
+       'PUBLIC must not execute the client-parameterized overload' as details
+from old_rpc o;
+
+with old_rpc as (
+  select to_regprocedure('public.consume_ai_quota(uuid,date,integer)') as oid
+)
+select 'rpc:old_consume_ai_quota:anon_authenticated_execute' as check_name,
+       case when o.oid is null then 'PASS'
+            when coalesce(has_function_privilege('anon', o.oid, 'EXECUTE'), false)
+              or coalesce(has_function_privilege('authenticated', o.oid, 'EXECUTE'), false)
+              then 'FAIL' else 'PASS' end as status,
+       'anon and authenticated must not execute the client-parameterized overload' as details
+from old_rpc o;
+
+with expected as (
+  select to_regprocedure('public.nutrition_ai_claim_operation(text)') as oid
+)
+select 'rpc:nutrition_ai_claim_operation:lease' as check_name,
+       case when e.oid is null then 'FAIL'
+            when position('2 minutes' in pg_get_functiondef(p.oid)) > 0 then 'PASS'
+            else 'FAIL' end as status,
+       'pending rows older than two minutes may be reclaimed by the same user' as details
+from expected e
+left join pg_proc p on p.oid = e.oid;
+
 -- 7. Baseline preservation. Values are from the confirmed preflight.
 with checks(check_name, actual_count, expected_count) as (
   values
@@ -305,11 +407,31 @@ select check_name,
        'actual=' || actual_count::text || ', expected minimum=' || expected_count::text as details
 from checks;
 
+with column_meta as (
+  select coalesce(max(data_type), 'missing') as data_type
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = 'user_profiles'
+    and column_name = 'training_data'
+), values_checked as (
+  select count(*) filter (
+    where training_data is not null and btrim(training_data::text) <> ''
+  ) as text_nonempty,
+  count(*) filter (
+    where training_data is not null and btrim(training_data::text) <> '[]'
+  ) as json_nonempty
+  from public.user_profiles
+)
 select 'baseline:training_data_nonempty' as check_name,
-       case when count(*) = 0 then 'FAIL' else 'PASS' end as status,
-       'non-empty user_profiles.training_data rows=' || count(*)::text as details
-from public.user_profiles
-where training_data is not null and training_data <> '[]'::jsonb;
+       case when m.data_type = 'text' and v.text_nonempty >= 1 then 'PASS'
+            when m.data_type = 'jsonb' and v.json_nonempty >= 1 then 'PASS'
+            when m.data_type in ('text', 'jsonb') then 'FAIL'
+            when m.data_type is null then 'FAIL'
+            else 'REVIEW' end as status,
+       'data_type=' || coalesce(m.data_type, 'missing') ||
+         ', text_nonempty=' || v.text_nonempty::text ||
+         ', jsonb_nonempty=' || v.json_nonempty::text as details
+from column_meta m cross join values_checked v;
 
 select 'baseline:legacy_water_rows' as check_name,
        case when count(*) < 1 then 'FAIL'

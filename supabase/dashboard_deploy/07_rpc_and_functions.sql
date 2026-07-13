@@ -4,7 +4,7 @@ Read-only: No.
 Data modification: Creates/replaces named SECURITY DEFINER functions only.
 Expected time: Under 15 seconds.
 Success: Only authenticated callers can execute these RPCs; auth.uid(), current_date
-and the fixed limit are server-derived.
+and the fixed limit are server-derived. Existing account-deletion functions are untouched.
 Failure/retry: Safe to rerun after reviewing function signature conflicts.
 */
 
@@ -16,6 +16,7 @@ do $$
 begin
   if to_regprocedure('public.consume_ai_quota(uuid,date,integer)') is not null then
     execute 'revoke all on function public.consume_ai_quota(uuid, date, integer) from public';
+    execute 'revoke all on function public.consume_ai_quota(uuid, date, integer) from anon';
     execute 'revoke all on function public.consume_ai_quota(uuid, date, integer) from authenticated';
   end if;
 end $$;
@@ -78,12 +79,18 @@ begin
     raise exception 'invalid_request_id';
   end if;
 
-  insert into public.client_operations (
+  insert into public.client_operations as existing (
     operation_id, user_id, entity_type, entity_id, action, payload, response
   ) values (
     p_client_request_id, auth.uid(), 'nutrition-ai', p_client_request_id,
     'upsert', '{}'::jsonb, null
-  ) on conflict (user_id, operation_id) do nothing;
+  ) on conflict (user_id, operation_id) do update
+    set claimed_at = now(),
+        updated_at = now()
+    where existing.entity_type = 'nutrition-ai'
+      and existing.response is null
+      and (existing.claimed_at is null
+           or existing.claimed_at < now() - interval '2 minutes');
 
   return found;
 end;
@@ -108,6 +115,7 @@ begin
 
   update public.client_operations
   set response = p_response,
+      claimed_at = now(),
       updated_at = now()
   where user_id = auth.uid()
     and entity_type = 'nutrition-ai'
@@ -141,30 +149,14 @@ begin
 end;
 $$;
 
-create or replace function public.delete_user()
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if auth.uid() is null then
-    raise exception 'not_authenticated';
-  end if;
-  delete from auth.users where id = auth.uid();
-end;
-$$;
-
 revoke all on function public.nutrition_ai_get_cached_response(text) from public;
 revoke all on function public.nutrition_ai_claim_operation(text) from public;
 revoke all on function public.nutrition_ai_save_response(text, jsonb) from public;
 revoke all on function public.nutrition_ai_release_operation(text) from public;
-revoke all on function public.delete_user() from public;
 
 grant execute on function public.nutrition_ai_get_cached_response(text) to authenticated;
 grant execute on function public.nutrition_ai_claim_operation(text) to authenticated;
 grant execute on function public.nutrition_ai_save_response(text, jsonb) to authenticated;
 grant execute on function public.nutrition_ai_release_operation(text) to authenticated;
-grant execute on function public.delete_user() to authenticated;
 
 commit;

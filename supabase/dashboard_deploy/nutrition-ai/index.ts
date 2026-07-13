@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEXT_LENGTH = 8_000;
 const TIMEOUT_MS = 20_000;
+const LEASE_RETRY_SECONDS = 120;
 const MEAL_TYPES = new Set(['早餐', '午餐', '晚餐', '加餐']);
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -88,8 +89,14 @@ function responseBody(body: Record<string, unknown>, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 }
 
-function errorResponse(code: string, message: string, status: number, requestId = '') {
-  return responseBody({ code, message, ...(requestId ? { requestId } : {}) }, status);
+function errorResponse(
+  code: string,
+  message: string,
+  status: number,
+  requestId = '',
+  details: Record<string, unknown> = {},
+) {
+  return responseBody({ code, message, ...details, ...(requestId ? { requestId } : {}) }, status);
 }
 
 function stripFence(value: string): string {
@@ -179,7 +186,13 @@ export function createNutritionAiHandler(
       if (concurrent.data && typeof concurrent.data === 'object') {
         return responseBody(concurrent.data as Record<string, unknown>, 200);
       }
-      return errorResponse('REQUEST_IN_PROGRESS', '请求正在处理中', 409, requestId);
+      return errorResponse(
+        'REQUEST_IN_PROGRESS',
+        '请求正在处理中',
+        409,
+        requestId,
+        { retryAfterSeconds: LEASE_RETRY_SECONDS },
+      );
     }
 
     const releaseOperation = async () => {

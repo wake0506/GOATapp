@@ -23,7 +23,7 @@ create table if not exists public.user_profiles (
   target_p numeric not null default 150,
   target_c numeric not null default 200,
   target_f numeric not null default 60,
-  training_data jsonb not null default '[]'::jsonb,
+  training_data text not null default '',
   version integer not null default 1,
   deleted_at timestamptz,
   client_operation_id text,
@@ -157,6 +157,7 @@ create table if not exists public.client_operations (
   action text not null,
   payload jsonb not null default '{}'::jsonb,
   response jsonb,
+  claimed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (user_id, operation_id)
@@ -172,5 +173,9 @@ create table if not exists public.ai_usage_daily (
   updated_at timestamptz not null default now(),
   primary key (user_id, date)
 );
+
+-- Existing client_operations tables receive only the missing lease field.
+alter table public.client_operations
+  add column if not exists claimed_at timestamptz;
 
 commit;

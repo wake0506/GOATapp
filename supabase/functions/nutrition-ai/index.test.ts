@@ -1,9 +1,24 @@
 import {
   createNutritionAiHandler,
+  parseDefaultKey,
   parseRequestBody,
   validateCachedResponse,
   validateAiItems,
 } from './index.ts';
+
+Deno.test('default Supabase key is parsed from a dictionary', () => {
+  if (parseDefaultKey('{"default":"test-key"}') !== 'test-key') {
+    throw new Error('default key was not returned');
+  }
+});
+
+Deno.test('invalid Supabase key dictionaries return null', () => {
+  for (const value of [undefined, '', 'not-json', '[]', '{"default":123}', '{}']) {
+    if (parseDefaultKey(value) !== null) {
+      throw new Error('invalid key dictionary was accepted');
+    }
+  }
+});
 
 const validItem = {
   name: '鸡蛋',

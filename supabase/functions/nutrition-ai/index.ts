@@ -34,6 +34,18 @@ type ClaimState =
   | { status: 'IN_PROGRESS'; claimToken: null; response: null }
   | { status: 'CACHED'; claimToken: null; response: unknown };
 
+export function parseDefaultKey(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const defaultKey = (parsed as Record<string, unknown>).default;
+    return typeof defaultKey === 'string' && defaultKey ? defaultKey : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parseRequestBody(value: unknown): {
   text: string;
   defaultMealType: string;
@@ -168,9 +180,14 @@ export function createNutritionAiHandler(
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const publishableKey =
-      Deno.env.get('SUPABASE_PUBLISHABLE_KEY') ??
       Deno.env.get('SUPABASE_ANON_KEY') ??
-      '';
+      parseDefaultKey(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS'));
+    const secretKey =
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
+      parseDefaultKey(Deno.env.get('SUPABASE_SECRET_KEYS'));
+    if (!publishableKey || !secretKey) {
+      return errorResponse('EDGE_CONFIGURATION_ERROR', '服务配置错误', 500, requestId);
+    }
     const userClient = createClient(supabaseUrl, publishableKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
@@ -199,10 +216,7 @@ export function createNutritionAiHandler(
     }
 
     const providerKey = Deno.env.get('DEEPSEEK_API_KEY');
-    const secretKey =
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
-      Deno.env.get('SUPABASE_SECRET_KEYS');
-    if (!providerKey || !secretKey) {
+    if (!providerKey) {
       return errorResponse('AI_NOT_CONFIGURED', 'AI 服务暂未配置', 503, requestId);
     }
 

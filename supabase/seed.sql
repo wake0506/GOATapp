@@ -1,0 +1,1 @@
+-- Local-only seed. No credentials or personal data belong in this file.

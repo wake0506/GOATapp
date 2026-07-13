@@ -7,16 +7,26 @@ import '../models/consumed_record.dart';
 import '../models/exercise_record.dart';
 import '../models/food_item.dart';
 import '../models/pending_cloud_deletes.dart';
+import '../repositories/sync_repository.dart';
 
-class CloudSyncService {
+const bool enableVersionedCloudSync = bool.fromEnvironment(
+  'GOAT_ENABLE_VERSIONED_CLOUD_SYNC',
+  defaultValue: false,
+);
+
+class CloudSyncService implements SyncRepository {
   final SupabaseClient client;
 
   CloudSyncService(this.client);
 
+  @override
   Future<PendingCloudDeletes> syncSnapshot({
     required User user,
     required AppSnapshot snapshot,
   }) async {
+    if (enableVersionedCloudSync) {
+      await _upsertTombstones(user, snapshot.pendingCloudDeletes);
+    }
     await client.from('user_profiles').upsert({
       'id': user.id,
       'target_kcal': snapshot.targetKcal,
@@ -120,10 +130,82 @@ class CloudSyncService {
           .inFilter('date', pendingDates);
     }
 
-    // The current Supabase schema has no per-intake water table. Keep those
-    // local pending deletes until that table is available; daily_tracking
-    // continues to receive the derived aggregate for compatibility.
-    return snapshot.pendingCloudDeletes.copyWith(waterRecordIds: const {});
+    if (enableVersionedCloudSync) {
+      await _syncWaterRecords(user, snapshot);
+      await _syncWeightRecords(user, snapshot);
+    }
+
+    // The compatibility path can still sync the phase-one tables before the
+    // additive migration is deployed. Once enabled, all delete IDs are safe
+    // to acknowledge because their tombstones were written first.
+    return enableVersionedCloudSync
+        ? snapshot.pendingCloudDeletes
+        : snapshot.pendingCloudDeletes.copyWith(waterRecordIds: const {});
+  }
+
+  Future<void> _syncWaterRecords(User user, AppSnapshot snapshot) async {
+    final rows = snapshot.waterRecords
+        .map(
+          (record) => {
+            'id': record.id,
+            'user_id': user.id,
+            'date': record.date,
+            'recorded_at': record.recordedAt.toUtc().toIso8601String(),
+            'amount_ml': record.amountMl,
+            'is_legacy_aggregate': record.isLegacyAggregate,
+          },
+        )
+        .toList();
+    if (rows.isNotEmpty) {
+      await client.from('water_intake_records').upsert(rows);
+    }
+    final ids = snapshot.pendingCloudDeletes.waterRecordIds;
+    if (ids.isNotEmpty) {
+      await client
+          .from('water_intake_records')
+          .delete()
+          .eq('user_id', user.id)
+          .inFilter('id', ids.toList());
+    }
+  }
+
+  Future<void> _syncWeightRecords(User user, AppSnapshot snapshot) async {
+    final rows = snapshot.weight.entries
+        .map(
+          (entry) => {
+            'id': 'legacy_weight_${user.id}_${entry.key}',
+            'user_id': user.id,
+            'date': entry.key,
+            'weight_kg': entry.value,
+          },
+        )
+        .toList();
+    if (rows.isNotEmpty) {
+      await client.from('body_weight_logs').upsert(rows);
+    }
+  }
+
+  Future<void> _upsertTombstones(User user, PendingCloudDeletes pending) async {
+    final rows = <Map<String, dynamic>>[];
+    void add(String entityType, Iterable<String> ids) {
+      for (final id in ids) {
+        rows.add({
+          'id': '$entityType:$id',
+          'user_id': user.id,
+          'entity_type': entityType,
+          'entity_id': id,
+          'deleted_at': DateTime.now().toUtc().toIso8601String(),
+        });
+      }
+    }
+
+    add('food_dictionary', pending.foodIds);
+    add('diet_logs', pending.dietRecordIds);
+    add('exercise_logs', pending.exerciseRecordIds);
+    add('water_intake_records', pending.waterRecordIds);
+    if (rows.isNotEmpty) {
+      await client.from('sync_tombstones').upsert(rows);
+    }
   }
 
   Future<void> _syncTable<T>({
@@ -144,33 +226,99 @@ class CloudSyncService {
     }
   }
 
-  Future<AppSnapshot?> fetchSnapshot(User user) async {
+  @override
+  Future<AppSnapshot?> fetchSnapshot(
+    User user, {
+    DateTime? lastSyncedAt,
+  }) async {
+    final useIncremental = enableVersionedCloudSync && lastSyncedAt != null;
     final profile = await client
         .from('user_profiles')
         .select()
         .eq('id', user.id)
         .maybeSingle();
-    final foods = await client
+    final foodsQuery = client
         .from('food_dictionary')
         .select()
         .eq('user_id', user.id);
-    final consumed = await client
+    final consumedQuery = client
         .from('diet_logs')
         .select()
         .eq('user_id', user.id);
-    final exercises = await client
+    final exercisesQuery = client
         .from('exercise_logs')
         .select()
         .eq('user_id', user.id);
-    final tracking = await client
+    final trackingQuery = client
         .from('daily_tracking')
         .select()
         .eq('user_id', user.id);
+    if (useIncremental) {
+      final cursor = lastSyncedAt.toUtc().toIso8601String();
+      foodsQuery.gt('updated_at', cursor);
+      consumedQuery.gt('updated_at', cursor);
+      exercisesQuery.gt('updated_at', cursor);
+      trackingQuery.gt('updated_at', cursor);
+    }
+    final foods = await foodsQuery;
+    final consumed = await consumedQuery;
+    final exercises = await exercisesQuery;
+    final tracking = await trackingQuery;
+
+    List<Map<String, dynamic>> waterRecords = const [];
+    List<Map<String, dynamic>> bodyWeights = const [];
+    List<Map<String, dynamic>> tombstones = const [];
+    Set<String> tombstoneKeys = const {};
+    if (enableVersionedCloudSync) {
+      final waterQuery = client
+          .from('water_intake_records')
+          .select()
+          .eq('user_id', user.id);
+      final weightQuery = client
+          .from('body_weight_logs')
+          .select()
+          .eq('user_id', user.id);
+      final tombstoneQuery = client
+          .from('sync_tombstones')
+          .select('entity_type, entity_id')
+          .eq('user_id', user.id);
+      if (useIncremental) {
+        final cursor = lastSyncedAt.toUtc().toIso8601String();
+        waterQuery.gt('updated_at', cursor);
+        weightQuery.gt('updated_at', cursor);
+        tombstoneQuery.gt('updated_at', cursor);
+      }
+      waterRecords = List<Map<String, dynamic>>.from(await waterQuery);
+      bodyWeights = List<Map<String, dynamic>>.from(await weightQuery);
+      tombstones = List<Map<String, dynamic>>.from(await tombstoneQuery);
+      tombstoneKeys = {
+        for (final row in tombstones)
+          '${row['entity_type']}:${row['entity_id']}',
+      };
+    }
 
     final trainingJson = profile?['training_data'];
     final training = trainingJson is String
         ? jsonDecode(trainingJson)
         : trainingJson;
+    final tombstoneDeletes = PendingCloudDeletes(
+      foodIds: {
+        for (final row in tombstonesForType(tombstones, 'food_dictionary'))
+          row['entity_id'].toString(),
+      },
+      dietRecordIds: {
+        for (final row in tombstonesForType(tombstones, 'diet_logs'))
+          row['entity_id'].toString(),
+      },
+      exerciseRecordIds: {
+        for (final row in tombstonesForType(tombstones, 'exercise_logs'))
+          row['entity_id'].toString(),
+      },
+      waterRecordIds: {
+        for (final row in tombstonesForType(tombstones, 'water_intake_records'))
+          row['entity_id'].toString(),
+      },
+    );
     return AppSnapshot.fromJson({
       'gender': profile?['gender'],
       'birthYear': profile?['birth_year'],
@@ -183,6 +331,9 @@ class CloudSyncService {
       'targetF': profile?['target_f'],
       'targetKcal': profile?['target_kcal'],
       'foods': foods
+          .where(
+            (row) => !tombstoneKeys.contains('food_dictionary:${row['id']}'),
+          )
           .map(
             (row) => {
               'id': row['id'],
@@ -198,6 +349,7 @@ class CloudSyncService {
           )
           .toList(),
       'consumed': consumed
+          .where((row) => !tombstoneKeys.contains('diet_logs:${row['id']}'))
           .map(
             (row) => {
               'id': row['id'],
@@ -214,6 +366,7 @@ class CloudSyncService {
           )
           .toList(),
       'exercises': exercises
+          .where((row) => !tombstoneKeys.contains('exercise_logs:${row['id']}'))
           .map(
             (row) => {
               'id': row['id'],
@@ -226,12 +379,34 @@ class CloudSyncService {
           )
           .toList(),
       'training': training is List ? training : const [],
+      'waterRecords': waterRecords
+          .where(
+            (row) =>
+                !tombstoneKeys.contains('water_intake_records:${row['id']}'),
+          )
+          .map(
+            (row) => {
+              'id': row['id'],
+              'date': row['date'],
+              'recordedAt': row['recorded_at'],
+              'amountMl': row['amount_ml'],
+              'isLegacyAggregate': row['is_legacy_aggregate'],
+            },
+          )
+          .toList(),
       'water': {
         for (final row in tracking) row['date'].toString(): row['water_ml'],
       },
       'weight': {
-        for (final row in tracking) row['date'].toString(): row['weight_kg'],
+        for (final row in (bodyWeights.isEmpty ? tracking : bodyWeights))
+          row['date'].toString(): row['weight_kg'],
       },
+      'pendingCloudDeletes': tombstoneDeletes.toJson(),
     });
   }
 }
+
+List<Map<String, dynamic>> tombstonesForType(
+  Iterable<Map<String, dynamic>> rows,
+  String type,
+) => rows.where((row) => row['entity_type'] == type).toList();

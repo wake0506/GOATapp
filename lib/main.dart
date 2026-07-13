@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'dart:ui';
 import 'dart:convert';
@@ -32,8 +33,11 @@ import 'repositories/water_tracking_repository.dart';
 import 'services/cloud_sync_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/nutrition_ai_service.dart';
+import 'services/supabase_nutrition_ai_service.dart';
 import 'services/speech_recognition_service.dart';
 import 'services/nutrition_quick_access_service.dart';
+import 'services/sync_queue_service.dart';
+import 'services/sync_diagnostics.dart';
 
 export 'models/consumed_record.dart';
 export 'models/daily_macro_stats.dart';
@@ -120,8 +124,8 @@ class _MainTabControllerState extends State<MainTabController>
   late final CloudSyncService _cloudSyncService = CloudSyncService(supabase);
   final DeviceSpeechRecognitionService _speechService =
       DeviceSpeechRecognitionService();
-  late final DeepSeekNutritionAiService _nutritionAiService =
-      DeepSeekNutritionAiService(apiKey: deepSeekApiKey);
+  late final NutritionAiService _nutritionAiService =
+      _createNutritionAiService();
   final NutritionQuickAccessService _nutritionQuickAccessService =
       const NutritionQuickAccessService();
   LocalStorageService? _storage;
@@ -139,6 +143,10 @@ class _MainTabControllerState extends State<MainTabController>
   final String deepSeekApiKey = const String.fromEnvironment(
     'DEEPSEEK_API_KEY',
   );
+  bool get _allowDirectDebugAi =>
+      kDebugMode &&
+      const bool.fromEnvironment('GOAT_DEBUG_DIRECT_AI', defaultValue: false) &&
+      deepSeekApiKey.trim().isNotEmpty;
   late String _currentAiTip;
   String aiDismissedDate = "";
   bool _isAppLoading = true;
@@ -193,6 +201,7 @@ class _MainTabControllerState extends State<MainTabController>
   Map<String, double> dailyWeight = {};
   List<String> searchHistory = [];
   PendingCloudDeletes _pendingCloudDeletes = const PendingCloudDeletes.empty();
+  SyncQueueService _syncQueue = SyncQueueService();
 
   double targetP = 150, targetC = 200, targetF = 60, targetKcal = 2000;
   int resetHour = 0;
@@ -239,7 +248,9 @@ class _MainTabControllerState extends State<MainTabController>
     _authSubscription?.cancel();
     _restTimer?.cancel();
     unawaited(_speechService.dispose());
-    _nutritionAiService.dispose();
+    if (_nutritionAiService case final DeepSeekNutritionAiService service) {
+      service.dispose();
+    }
     super.dispose();
   }
 
@@ -263,6 +274,10 @@ class _MainTabControllerState extends State<MainTabController>
   Future<void> _fetchDailyAiTip() async {
     if (_isAiTipLoading) return;
     if (mounted) setState(() => _isAiTipLoading = true);
+    if (!_allowDirectDebugAi) {
+      if (mounted) setState(() => _isAiTipLoading = false);
+      return;
+    }
 
     // 🌟 这里使用的是你原本正确的 _getDailyStats 和 gender、height 等变量
     final stats = _getDailyStats(viewDateStr);
@@ -371,16 +386,29 @@ class _MainTabControllerState extends State<MainTabController>
   }
 
   Future<void> _saveData() async {
-    await _saveLocalPreferencesOnly();
+    final snapshot = _snapshotFromState();
     final user = supabase.auth.currentUser;
+    if (user != null && !user.isAnonymous) {
+      _syncQueue.enqueueSnapshot(userId: user.id, snapshot: snapshot);
+      for (final operation in _syncQueue.ready()) {
+        SyncDiagnostics.queue(
+          operationId: operation.operationId,
+          entityType: operation.entityType,
+          queueLength: _syncQueue.operations.length,
+          retryCount: operation.retryCount,
+        );
+      }
+    }
+    await _saveLocalPreferencesOnly();
     if (user == null || user.isAnonymous) return;
 
-    final snapshot = _snapshotFromState();
     try {
       final processedDeletes = await _cloudSyncService
           .syncSnapshot(user: user, snapshot: snapshot)
           .timeout(const Duration(seconds: 15));
       _pendingCloudDeletes = _pendingCloudDeletes.without(processedDeletes);
+      _syncQueue.markAllSucceeded();
+      _syncQueue.advanceCursor(DateTime.now().toUtc());
       await _storage?.save(_activeNamespace, _snapshotFromState());
       if (_guestMergePending && _storage != null) {
         await _storage!.clearNamespace(_storage!.namespaceForUser(null));
@@ -388,6 +416,10 @@ class _MainTabControllerState extends State<MainTabController>
       }
       _cloudSyncPending = false;
     } catch (e) {
+      for (final operation in _syncQueue.ready()) {
+        _syncQueue.markFailed(operation.operationId);
+      }
+      await _saveLocalPreferencesOnly();
       _cloudSyncPending = true;
       debugPrint('云端保存失败，保留本地待同步状态: $e');
     }
@@ -402,13 +434,21 @@ class _MainTabControllerState extends State<MainTabController>
     final user = supabase.auth.currentUser;
     if (user == null || user.isAnonymous) return;
     try {
-      final cloudSnapshot = await _cloudSyncService.fetchSnapshot(user);
+      final cloudSnapshot = await _cloudSyncService.fetchSnapshot(
+        user,
+        lastSyncedAt: enableVersionedCloudSync
+            ? _syncQueue.cursor.lastSyncedAt
+            : null,
+      );
       if (cloudSnapshot == null) return;
       final localSnapshot =
           _storage?.load(_activeNamespace) ?? AppSnapshot.empty();
-      final merged = localSnapshot.merge(cloudSnapshot);
+      final merged = localSnapshot
+          .merge(cloudSnapshot)
+          .applyDeletes(cloudSnapshot.pendingCloudDeletes);
       _applySnapshot(merged);
-      await _storage?.save(_activeNamespace, merged);
+      _syncQueue.advanceCursor(DateTime.now().toUtc());
+      await _saveLocalPreferencesOnly();
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint("云端拉取失败: $e");
@@ -437,6 +477,8 @@ class _MainTabControllerState extends State<MainTabController>
     water: Map.unmodifiable(waterTotals(waterIntakeRecords)),
     weight: Map.unmodifiable(dailyWeight),
     pendingCloudDeletes: _pendingCloudDeletes,
+    syncOperations: List.unmodifiable(_syncQueue.operations),
+    syncCursor: _syncQueue.cursor,
   );
 
   void _applySnapshot(AppSnapshot snapshot) {
@@ -462,7 +504,22 @@ class _MainTabControllerState extends State<MainTabController>
       waterIntakeRecords = [...snapshot.waterRecords];
       dailyWeight = {...snapshot.weight};
       _pendingCloudDeletes = snapshot.pendingCloudDeletes;
+      _syncQueue = SyncQueueService.fromSnapshot(
+        snapshot,
+        userId: _activeUserId ?? 'guest',
+      );
     });
+  }
+
+  NutritionAiService _createNutritionAiService() {
+    const useDirectDebugAi = bool.fromEnvironment(
+      'GOAT_DEBUG_DIRECT_AI',
+      defaultValue: false,
+    );
+    if (kDebugMode && useDirectDebugAi && deepSeekApiKey.trim().isNotEmpty) {
+      return DeepSeekNutritionAiService(apiKey: deepSeekApiKey);
+    }
+    return SupabaseNutritionAiService(client: supabase);
   }
 
   void _queueFoodDelete(String id) {
@@ -5042,6 +5099,13 @@ class _MainTabControllerState extends State<MainTabController>
     _saveLocalPreferencesOnly();
 
     setModalState(() => _isSearching = true);
+    if (!_allowDirectDebugAi) {
+      _rootMessengerKey.currentState?.showSnackBar(
+        const SnackBar(content: Text('AI 食物搜索需先完成服务端配置')),
+      );
+      setModalState(() => _isSearching = false);
+      return;
+    }
     try {
       final response = await http
           .post(
@@ -6347,6 +6411,10 @@ class _ChatAssistantPageState extends State<ChatAssistantPage> {
   final String deepSeekApiKey = const String.fromEnvironment(
     'DEEPSEEK_API_KEY',
   );
+  bool get _allowDirectDebugAi =>
+      kDebugMode &&
+      const bool.fromEnvironment('GOAT_DEBUG_DIRECT_AI', defaultValue: false) &&
+      deepSeekApiKey.trim().isNotEmpty;
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
   List<Map<String, String>> _messages = [];
@@ -6427,6 +6495,19 @@ class _ChatAssistantPageState extends State<ChatAssistantPage> {
       _controller.clear();
     });
     _scrollToBottom();
+
+    if (!_allowDirectDebugAi) {
+      if (mounted) {
+        setState(() {
+          _messages.add({
+            "role": "assistant",
+            "content": "AI 教练服务正在通过服务端代理接入，请先完成服务端配置。",
+          });
+          _isLoading = false;
+        });
+      }
+      return;
+    }
 
     try {
       final response = await http

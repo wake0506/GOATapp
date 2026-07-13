@@ -3,6 +3,8 @@ import 'exercise_record.dart';
 import 'food_item.dart';
 import 'json_value.dart';
 import 'pending_cloud_deletes.dart';
+import 'sync_cursor.dart';
+import 'sync_operation.dart';
 import 'training.dart';
 import 'water_intake_record.dart';
 
@@ -28,6 +30,8 @@ class AppSnapshot {
   final Map<String, int> water;
   final Map<String, double> weight;
   final PendingCloudDeletes pendingCloudDeletes;
+  final List<SyncOperation> syncOperations;
+  final SyncCursor syncCursor;
 
   const AppSnapshot({
     required this.gender,
@@ -51,6 +55,8 @@ class AppSnapshot {
     required this.water,
     required this.weight,
     this.pendingCloudDeletes = const PendingCloudDeletes.empty(),
+    this.syncOperations = const [],
+    this.syncCursor = const SyncCursor.empty(),
   });
 
   factory AppSnapshot.empty() => AppSnapshot(
@@ -75,6 +81,8 @@ class AppSnapshot {
     water: const {},
     weight: const {},
     pendingCloudDeletes: const PendingCloudDeletes.empty(),
+    syncOperations: const [],
+    syncCursor: const SyncCursor.empty(),
   );
 
   bool get hasData =>
@@ -85,7 +93,8 @@ class AppSnapshot {
       waterRecords.isNotEmpty ||
       water.isNotEmpty ||
       weight.isNotEmpty ||
-      searchHistory.isNotEmpty;
+      searchHistory.isNotEmpty ||
+      syncOperations.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
     'gender': gender,
@@ -109,6 +118,8 @@ class AppSnapshot {
     'water': water,
     'weight': weight,
     'pendingCloudDeletes': pendingCloudDeletes.toJson(),
+    'syncOperations': syncOperations.map((e) => e.toJson()).toList(),
+    'syncCursor': syncCursor.toJson(),
   };
 
   factory AppSnapshot.fromJson(Map<String, dynamic> json) {
@@ -116,9 +127,11 @@ class AppSnapshot {
     final decodedWater = _objects(
       json['waterRecords'],
     ).map(WaterIntakeRecord.fromJson).toList();
-    final waterRecords = decodedWater.isNotEmpty
-        ? decodedWater
-        : migrateWaterAggregates(legacyWater);
+    final decodedDates = decodedWater.map((record) => record.date).toSet();
+    final migratedWater = migrateWaterAggregates(
+      legacyWater,
+    ).where((record) => !decodedDates.contains(record.date));
+    final waterRecords = [...decodedWater, ...migratedWater];
     return AppSnapshot(
       gender: stringValue(json['gender'], '男'),
       birthYear: intValue(json['birthYear'], 2000),
@@ -151,6 +164,10 @@ class AppSnapshot {
       pendingCloudDeletes: PendingCloudDeletes.fromJson(
         json['pendingCloudDeletes'],
       ),
+      syncOperations: _objects(
+        json['syncOperations'],
+      ).map(SyncOperation.fromJson).toList(),
+      syncCursor: SyncCursor.fromJson(json['syncCursor']),
     );
   }
 
@@ -180,7 +197,59 @@ class AppSnapshot {
     ),
     weight: {...other.weight, ...weight},
     pendingCloudDeletes: pendingCloudDeletes.merge(other.pendingCloudDeletes),
+    syncOperations: _mergeSyncOperations(syncOperations, other.syncOperations),
+    syncCursor: _mergeCursors(syncCursor, other.syncCursor),
   );
+
+  AppSnapshot applyDeletes(PendingCloudDeletes deletes) {
+    if (deletes.isEmpty) return this;
+    final foodIds = deletes.foodIds;
+    final dietIds = deletes.dietRecordIds;
+    final exerciseIds = deletes.exerciseRecordIds;
+    final waterIds = deletes.waterRecordIds;
+    final nextWaterRecords = waterRecords
+        .where((record) => !waterIds.contains(record.id))
+        .toList();
+    return AppSnapshot(
+      gender: gender,
+      birthYear: birthYear,
+      birthMonth: birthMonth,
+      birthDay: birthDay,
+      height: height,
+      currentWeight: currentWeight,
+      searchHistory: searchHistory,
+      targetP: targetP,
+      targetC: targetC,
+      targetF: targetF,
+      targetKcal: targetKcal,
+      resetHour: resetHour,
+      aiDismissedDate: aiDismissedDate,
+      foods: foods.where((item) => !foodIds.contains(item.id)).toList(),
+      consumed: consumed.where((item) => !dietIds.contains(item.id)).toList(),
+      exercises: exercises
+          .where((item) => !exerciseIds.contains(item.id))
+          .toList(),
+      training: training,
+      waterRecords: nextWaterRecords,
+      water: waterTotals(nextWaterRecords),
+      weight: weight,
+      pendingCloudDeletes: pendingCloudDeletes.without(deletes),
+      syncOperations: syncOperations
+          .where(
+            (operation) =>
+                !(operation.entityType == 'food_dictionary' &&
+                    foodIds.contains(operation.entityId)) &&
+                !(operation.entityType == 'diet_logs' &&
+                    dietIds.contains(operation.entityId)) &&
+                !(operation.entityType == 'exercise_logs' &&
+                    exerciseIds.contains(operation.entityId)) &&
+                !(operation.entityType == 'water_intake_records' &&
+                    waterIds.contains(operation.entityId)),
+          )
+          .toList(),
+      syncCursor: syncCursor,
+    );
+  }
 }
 
 List<Map<String, dynamic>> _objects(Object? value) {
@@ -216,4 +285,26 @@ List<T> _mergeById<T>(List<T> left, List<T> right, String Function(T) idOf) {
     merged[idOf(value)] = value;
   }
   return merged.values.toList();
+}
+
+List<SyncOperation> _mergeSyncOperations(
+  List<SyncOperation> left,
+  List<SyncOperation> right,
+) {
+  final merged = <String, SyncOperation>{};
+  for (final operation in right) {
+    merged[operation.operationId] = operation;
+  }
+  for (final operation in left) {
+    merged[operation.operationId] = operation;
+  }
+  return merged.values.toList();
+}
+
+SyncCursor _mergeCursors(SyncCursor left, SyncCursor right) {
+  final leftAt = left.lastSyncedAt;
+  final rightAt = right.lastSyncedAt;
+  if (leftAt == null) return right;
+  if (rightAt == null || !rightAt.isAfter(leftAt)) return left;
+  return right;
 }

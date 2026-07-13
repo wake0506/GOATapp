@@ -1,6 +1,6 @@
 # Known Issues And Verification
 
-Branch: `refactor/stability-and-voice-entry`
+Branch: `feature/backend-production-sync`
 
 Phase 1 verification is based on the current branch head.
 
@@ -48,6 +48,14 @@ This file is updated with command results after the refactor and final quality c
 - Recent-food suggestions are derived from `ConsumedRecord` history using conservative name normalization; authoritative food nutrition data is not yet connected.
 - AI parsing remains optional. Recent foods, repeat actions, and copy-yesterday do not require a DeepSeek key.
 - Multi-device conflict resolution remains a phase-one limitation.
+
+## Phase 3A backend productionization
+
+- The migration and RLS policies are local-only in this phase. The remote schema has not been pushed.
+- Incremental sync and tombstone rollout must be feature-gated until the remote tables and policies are verified.
+- Conflict handling is deterministic last-write-wins by version and `updated_at`; same-version conflicts are diagnostic-only.
+- `training_data` remains an atomic legacy profile payload while structured `training_sessions` is introduced.
+- Supabase CLI/Docker availability must be verified before local database reset and pgTAP execution. The current environment does not resolve a `supabase` executable, so local SQL tests remain pending until the CLI and Docker Desktop are available.
 
 ## Speech recognition verification status
 

@@ -66,7 +66,7 @@ class _CopyDietSheetState extends State<CopyDietSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                widget.plan.isEmpty ? '昨天没有饮食记录' : '复制昨天饮食',
+                widget.plan.isEmpty ? '昨日暂无饮食记录' : '复制昨日',
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w700,
@@ -79,7 +79,7 @@ class _CopyDietSheetState extends State<CopyDietSheet> {
               ),
               const SizedBox(height: 12),
               if (widget.plan.isEmpty)
-                const Expanded(child: Center(child: Text('昨天没有可复制的记录')))
+                const Expanded(child: Center(child: Text('昨日暂无饮食记录')))
               else
                 Expanded(
                   child: ListView.builder(

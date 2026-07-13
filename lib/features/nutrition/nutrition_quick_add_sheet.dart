@@ -15,9 +15,14 @@ Future<void> showNutritionQuickAddSheet({
   required NutritionAiService nutritionService,
   required SpeechRecognitionService speechService,
   required bool enableSystemSpeech,
-  required Future<void> Function(RecentFoodSuggestion suggestion, double amount)
+  required Future<void> Function(
+    RecentFoodSuggestion suggestion,
+    double amount,
+    String mealType,
+  )
   onAddRecent,
   required VoidCallback onCopyYesterday,
+  required VoidCallback onCustomFood,
 }) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -35,6 +40,7 @@ Future<void> showNutritionQuickAddSheet({
       enableSystemSpeech: enableSystemSpeech,
       onAddRecent: onAddRecent,
       onCopyYesterday: onCopyYesterday,
+      onCustomFood: onCustomFood,
     ),
   );
 }
@@ -46,9 +52,14 @@ class NutritionQuickAddSheet extends StatefulWidget {
   final NutritionAiService nutritionService;
   final SpeechRecognitionService speechService;
   final bool enableSystemSpeech;
-  final Future<void> Function(RecentFoodSuggestion suggestion, double amount)
+  final Future<void> Function(
+    RecentFoodSuggestion suggestion,
+    double amount,
+    String mealType,
+  )
   onAddRecent;
   final VoidCallback onCopyYesterday;
+  final VoidCallback onCustomFood;
 
   const NutritionQuickAddSheet({
     super.key,
@@ -60,6 +71,7 @@ class NutritionQuickAddSheet extends StatefulWidget {
     required this.enableSystemSpeech,
     required this.onAddRecent,
     required this.onCopyYesterday,
+    required this.onCustomFood,
   });
 
   @override
@@ -72,6 +84,9 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
   String? _error;
   bool _loading = false;
   bool _saving = false;
+  late String _mealType = widget.mealType;
+
+  static const _mealTypes = ['早餐', '午餐', '晚餐', '加餐'];
 
   @override
   void dispose() {
@@ -89,10 +104,15 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
     try {
       final items = await widget.nutritionService.parseDietText(
         text,
-        defaultMealType: widget.mealType,
+        defaultMealType: _mealType,
       );
       if (!mounted) return;
-      setState(() => _preview = items);
+      setState(() {
+        _preview = items;
+        if (_preview.map((item) => item.mealType).toSet().length == 1) {
+          _mealType = _preview.first.mealType;
+        }
+      });
     } catch (_) {
       if (mounted) setState(() => _error = 'AI 暂时不可用，请检查文本后重试');
     } finally {
@@ -152,7 +172,7 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
     );
     controller.dispose();
     if (amount == null || !mounted) return;
-    await widget.onAddRecent(suggestion, amount);
+    await widget.onAddRecent(suggestion, amount, _mealType);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -175,11 +195,41 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  '当前餐次：${widget.mealType}',
-                  style: const TextStyle(color: Colors.black45),
-                ),
+                Text('当前餐次', style: const TextStyle(color: Colors.black45)),
                 const SizedBox(height: 16),
+                SegmentedButton<String>(
+                  segments: _mealTypes
+                      .map(
+                        (meal) => ButtonSegment(value: meal, label: Text(meal)),
+                      )
+                      .toList(),
+                  selected: {_mealType},
+                  onSelectionChanged: _saving
+                      ? null
+                      : (selection) {
+                          final meal = selection.first;
+                          setState(() {
+                            _mealType = meal;
+                            for (final item in _preview) {
+                              item.mealType = meal;
+                            }
+                          });
+                        },
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: WidgetStateProperty.resolveWith(
+                      (states) => states.contains(WidgetState.selected)
+                          ? const Color(0xFF008C8C)
+                          : const Color(0xFFF4F5F7),
+                    ),
+                    foregroundColor: WidgetStateProperty.resolveWith(
+                      (states) => states.contains(WidgetState.selected)
+                          ? Colors.white
+                          : Colors.black54,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 if (widget.recentFoods.isNotEmpty) ...[
                   const Text(
                     '最近吃过',
@@ -215,12 +265,16 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                                const Spacer(),
+                                const SizedBox(height: 6),
                                 Text(
                                   '${food.amount.toStringAsFixed(0)}${food.unit} · ${food.kcal.toInt()} kcal',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 Text(
                                   '已记录 ${food.usageCount} 次',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     color: Colors.black45,
                                     fontSize: 11,
@@ -232,6 +286,17 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
                         );
                       },
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                ] else ...[
+                  const Text(
+                    '最近吃过',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '完成一次饮食记录后，常用食物会显示在这里',
+                    style: TextStyle(color: Colors.black45),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -275,9 +340,24 @@ class _NutritionQuickAddSheetState extends State<NutritionQuickAddSheet> {
                 ],
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: _saving ? null : widget.onCopyYesterday,
+                  onPressed: _saving
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          widget.onCopyYesterday();
+                        },
                   icon: const Icon(Icons.content_copy_rounded),
-                  label: const Text('复制昨天饮食'),
+                  label: const Text('复制昨日'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _saving
+                      ? null
+                      : () {
+                          Navigator.of(context).pop();
+                          widget.onCustomFood();
+                        },
+                  icon: const Icon(Icons.edit_note_rounded),
+                  label: const Text('自定义食物'),
                 ),
                 if (_preview.isNotEmpty) ...[
                   const SizedBox(height: 18),

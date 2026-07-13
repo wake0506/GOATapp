@@ -8,6 +8,7 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:goat_app/models/app_snapshot.dart';
 import 'package:goat_app/models/consumed_record.dart';
+import 'package:goat_app/models/recent_food_suggestion.dart';
 import 'package:goat_app/models/parsed_diet_item.dart';
 import 'package:goat_app/features/voice_entry/voice_entry_sheet.dart';
 import 'package:goat_app/repositories/nutrition_repository.dart';
@@ -15,6 +16,7 @@ import 'package:goat_app/services/local_storage_service.dart';
 import 'package:goat_app/services/nutrition_ai_service.dart';
 import 'package:goat_app/services/nutrition_quick_access_service.dart';
 import 'package:goat_app/services/speech_recognition_service.dart';
+import 'package:goat_app/features/nutrition/nutrition_quick_add_sheet.dart';
 import 'package:goat_app/models/pending_cloud_deletes.dart';
 
 class _FakeClient extends http.BaseClient {
@@ -671,5 +673,88 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.saved, hasLength(1));
     expect(repository.saved.single.mealType, '早餐');
+  });
+
+  testWidgets('quick nutrition entry shows empty recent and copy actions', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => IconButton(
+              tooltip: '早餐添加',
+              icon: const Icon(Icons.add_circle),
+              onPressed: () => showNutritionQuickAddSheet(
+                context: context,
+                mealType: '早餐',
+                recentFoods: const [],
+                repository: _FakeNutritionRepository(),
+                nutritionService: _FakeNutritionService(),
+                speechService: _FakeSpeechService(),
+                enableSystemSpeech: false,
+                onAddRecent: (_, _, _) async {},
+                onCopyYesterday: () {},
+                onCustomFood: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('早餐添加'));
+    await tester.pumpAndSettle();
+    expect(find.text('最近吃过'), findsOneWidget);
+    expect(find.text('完成一次饮食记录后，常用食物会显示在这里'), findsOneWidget);
+    expect(find.text('复制昨日'), findsOneWidget);
+  });
+
+  testWidgets('quick nutrition entry shows historical suggestions', (
+    tester,
+  ) async {
+    final suggestion = RecentFoodSuggestion(
+      normalizedKey: 'egg',
+      displayName: '鸡蛋',
+      amount: 2,
+      unit: '个',
+      kcal: 140,
+      protein: 12,
+      carbs: 1,
+      fat: 10,
+      lastMealType: '早餐',
+      lastUsedAt: DateTime(2026, 7, 13),
+      usageCount: 3,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => IconButton(
+              tooltip: '早餐添加',
+              icon: const Icon(Icons.add_circle),
+              onPressed: () => showNutritionQuickAddSheet(
+                context: context,
+                mealType: '早餐',
+                recentFoods: [suggestion],
+                repository: _FakeNutritionRepository(),
+                nutritionService: _FakeNutritionService(),
+                speechService: _FakeSpeechService(),
+                enableSystemSpeech: false,
+                onAddRecent: (_, _, _) async {},
+                onCopyYesterday: () {},
+                onCustomFood: () {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byTooltip('早餐添加'));
+    await tester.pumpAndSettle();
+    expect(find.text('最近吃过'), findsOneWidget);
+    expect(find.text('鸡蛋'), findsOneWidget);
+    expect(find.text('复制昨日'), findsOneWidget);
   });
 }

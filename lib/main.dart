@@ -40,6 +40,9 @@ const bool enableSystemSpeechRecognition = bool.fromEnvironment(
   defaultValue: false,
 );
 
+final GlobalKey<ScaffoldMessengerState> _rootMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -69,6 +72,7 @@ class GoatApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      scaffoldMessengerKey: _rootMessengerKey,
       debugShowCheckedModeBanner: false,
       scrollBehavior: const MaterialScrollBehavior().copyWith(
         dragDevices: {
@@ -118,6 +122,8 @@ class _MainTabControllerState extends State<MainTabController>
   String? _activeUserId;
   StreamSubscription<AuthState>? _authSubscription;
   bool _cloudSyncPending = false;
+  ConsumedRecord? _undoDietRecord;
+  int _undoDietIndex = 0;
   bool _guestMergePending = false;
   String _dailyAiTip = "正在为您生成专属健康建议...";
   bool _isAiTipLoading = false;
@@ -531,8 +537,34 @@ class _MainTabControllerState extends State<MainTabController>
     final index = allConsumedItems.indexWhere((item) => item.id == recordId);
     if (index == -1) return;
     final record = allConsumedItems[index];
+    _undoDietRecord = record;
+    _undoDietIndex = index;
     setState(() => allConsumedItems.removeAt(index));
     _queueDietDelete(record.id);
+    await _saveData();
+    _rootMessengerKey.currentState
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: const Text('已删除该记录'),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: '撤销',
+            onPressed: () => unawaited(_undoLastDietDelete()),
+          ),
+        ),
+      );
+  }
+
+  Future<void> _undoLastDietDelete() async {
+    final record = _undoDietRecord;
+    if (record == null || !mounted) return;
+    _undoDietRecord = null;
+    _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
+      dietRecordIds: {..._pendingCloudDeletes.dietRecordIds}..remove(record.id),
+    );
+    final index = _undoDietIndex.clamp(0, allConsumedItems.length);
+    setState(() => allConsumedItems.insert(index, record));
     await _saveData();
   }
 
@@ -549,11 +581,7 @@ class _MainTabControllerState extends State<MainTabController>
   @override
   Future<void> replaceRecordsForOperation(List<ConsumedRecord> records) async {
     if (!mounted) return;
-    final ids = records.map((record) => record.id).toSet();
     setState(() {
-      allConsumedItems.removeWhere(
-        (record) => record.date == viewDateStr && ids.contains(record.id),
-      );
       allConsumedItems.insertAll(0, records);
     });
     await _saveData();
@@ -2528,21 +2556,21 @@ class _MainTabControllerState extends State<MainTabController>
                                     consumed
                                         .where((e) => e.mealType == '早餐')
                                         .toList(),
-                                    () => _showFoodPicker(context, '早餐'),
+                                    () => _showNutritionQuickAdd('早餐'),
                                   ),
                                   _buildSubGroup(
                                     '午餐',
                                     consumed
                                         .where((e) => e.mealType == '午餐')
                                         .toList(),
-                                    () => _showFoodPicker(context, '午餐'),
+                                    () => _showNutritionQuickAdd('午餐'),
                                   ),
                                   _buildSubGroup(
                                     '晚餐',
                                     consumed
                                         .where((e) => e.mealType == '晚餐')
                                         .toList(),
-                                    () => _showFoodPicker(context, '晚餐'),
+                                    () => _showNutritionQuickAdd('晚餐'),
                                   ),
                                 ],
                               ),
@@ -2556,14 +2584,14 @@ class _MainTabControllerState extends State<MainTabController>
                                     consumed
                                         .where((e) => e.mealType == '补剂')
                                         .toList(),
-                                    () => _showFoodPicker(context, '补剂'),
+                                    () => _showNutritionQuickAdd('加餐'),
                                   ),
                                   _buildSubGroup(
                                     '日常补充',
                                     consumed
                                         .where((e) => e.mealType == '日常补充')
                                         .toList(),
-                                    () => _showFoodPicker(context, '日常补充'),
+                                    () => _showNutritionQuickAdd('加餐'),
                                   ),
                                 ],
                               ),
@@ -5186,7 +5214,7 @@ class _MainTabControllerState extends State<MainTabController>
       nutritionService: _nutritionAiService,
       speechService: _speechService,
       enableSystemSpeech: enableSystemSpeechRecognition,
-      onAddRecent: (suggestion, amount) async {
+      onAddRecent: (suggestion, amount, selectedMealType) async {
         final ratio = amount / suggestion.amount;
         await addConsumedRecords([
           ConsumedRecord(
@@ -5196,7 +5224,7 @@ class _MainTabControllerState extends State<MainTabController>
             c: suggestion.carbs * ratio,
             f: suggestion.fat * ratio,
             kcal: suggestion.kcal * ratio,
-            mealType: mealType,
+            mealType: selectedMealType,
             date: viewDateStr,
             amount: amount,
             unit: suggestion.unit,
@@ -5204,13 +5232,33 @@ class _MainTabControllerState extends State<MainTabController>
         ]);
       },
       onCopyYesterday: () {
-        Navigator.pop(context);
         _showCopyYesterdaySheet(mealType);
+      },
+      onCustomFood: () {
+        _showFoodPicker(this.context, mealType);
       },
     );
   }
 
   Future<void> _showCopyYesterdaySheet(String? mealType) async {
+    final copyAll = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('复制昨日'),
+        content: const Text('选择复制范围'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('当前餐次'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('全天饮食'),
+          ),
+        ],
+      ),
+    );
+    if (copyAll == null) return;
     final date = DateUtils.dateOnly(
       DateTime.tryParse(viewDateStr) ?? DateTime.now(),
     ).subtract(const Duration(days: 1));
@@ -5218,7 +5266,7 @@ class _MainTabControllerState extends State<MainTabController>
     final plan = _nutritionQuickAccessService.copyPlan(
       records: allConsumedItems,
       sourceDate: sourceDate,
-      mealType: mealType,
+      mealType: copyAll ? null : mealType,
     );
     await showCopyDietSheet(
       context: context,
@@ -5451,7 +5499,7 @@ class _MainTabControllerState extends State<MainTabController>
                   icon: const Icon(Icons.add_circle, color: GoatApp.marsGreen),
                   onPressed: () {
                     Navigator.pop(context);
-                    _showFoodPicker(context, mealType);
+                    _showNutritionQuickAdd(mealType);
                   },
                 ),
               ],
@@ -5555,9 +5603,7 @@ class _MainTabControllerState extends State<MainTabController>
                             children: [
                               CustomSlidableAction(
                                 onPressed: (ctx) {
-                                  setState(() => allConsumedItems.remove(item));
-                                  _queueDietDelete(item.id);
-                                  _saveData();
+                                  unawaited(deleteRecord(item.id));
                                   items.remove(item);
                                   setPopupState(() {});
                                 },

@@ -4,15 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:goat_app/models/app_snapshot.dart';
+import 'package:goat_app/models/consumed_record.dart';
 import 'package:goat_app/models/parsed_diet_item.dart';
 import 'package:goat_app/features/voice_entry/voice_entry_sheet.dart';
 import 'package:goat_app/repositories/nutrition_repository.dart';
 import 'package:goat_app/services/local_storage_service.dart';
 import 'package:goat_app/services/nutrition_ai_service.dart';
+import 'package:goat_app/services/nutrition_quick_access_service.dart';
 import 'package:goat_app/services/speech_recognition_service.dart';
 import 'package:goat_app/models/pending_cloud_deletes.dart';
 
@@ -89,9 +90,27 @@ class _FakeNutritionRepository implements NutritionRepository {
   List<ParsedDietItem> saved = [];
 
   @override
+  List<ConsumedRecord> recordsForDate(String date) => const [];
+
+  @override
   Future<void> addRecords(List<ParsedDietItem> items) async {
     saved = [...items];
   }
+
+  @override
+  Future<void> addConsumedRecords(List<ConsumedRecord> records) async {}
+
+  @override
+  Future<void> updateRecord(ConsumedRecord record) async {}
+
+  @override
+  Future<void> deleteRecord(String recordId) async {}
+
+  @override
+  Future<void> restoreRecord(ConsumedRecord record) async {}
+
+  @override
+  Future<void> replaceRecordsForOperation(List<ConsumedRecord> records) async {}
 }
 
 class _FakeSpeechToText extends stt.SpeechToText {
@@ -279,6 +298,7 @@ void main() {
     await service.startListening(onPartial: (_) {});
     await service.cancel();
     engine.emitPartial('迟到的结果');
+    await Future<void>.delayed(Duration.zero);
 
     expect(states.last, SpeechState.idle);
     expect(states, isNot(contains(SpeechState.recognized)));
@@ -403,6 +423,145 @@ void main() {
     final snapshot = AppSnapshot.fromJson({'foods': []});
 
     expect(snapshot.pendingCloudDeletes.isEmpty, isTrue);
+  });
+
+  test('recent foods normalize conservative quantity suffixes', () {
+    const service = NutritionQuickAccessService();
+    final suggestions = service.recentFoods(
+      records: [
+        ConsumedRecord(
+          id: '1',
+          name: 'Chicken (100g)',
+          p: 20,
+          c: 0,
+          f: 3,
+          kcal: 120,
+          mealType: 'breakfast',
+          date: '2026-07-12',
+        ),
+        ConsumedRecord(
+          id: '2',
+          name: ' Chicken ',
+          p: 20,
+          c: 0,
+          f: 3,
+          kcal: 120,
+          mealType: 'breakfast',
+          date: '2026-07-13',
+        ),
+      ],
+    );
+
+    expect(suggestions, hasLength(1));
+    expect(suggestions.single.usageCount, 2);
+  });
+
+  test('recent foods do not merge distinct names', () {
+    const service = NutritionQuickAccessService();
+    final suggestions = service.recentFoods(
+      records: [
+        ConsumedRecord(
+          id: '1',
+          name: 'Apple',
+          p: 0,
+          c: 14,
+          f: 0,
+          kcal: 52,
+          mealType: 'snack',
+          date: '2026-07-13',
+        ),
+        ConsumedRecord(
+          id: '2',
+          name: 'Banana',
+          p: 1,
+          c: 23,
+          f: 0,
+          kcal: 89,
+          mealType: 'snack',
+          date: '2026-07-13',
+        ),
+      ],
+    );
+
+    expect(
+      suggestions.map((item) => item.displayName),
+      containsAll(['Apple', 'Banana']),
+    );
+  });
+
+  test('recent foods prioritize current meal and usage', () {
+    const service = NutritionQuickAccessService();
+    final records = List<ConsumedRecord>.generate(
+      3,
+      (index) => ConsumedRecord(
+        id: 'egg-$index',
+        name: 'Egg',
+        p: 6,
+        c: 1,
+        f: 5,
+        kcal: 70,
+        mealType: 'breakfast',
+        date: '2026-07-${10 + index}',
+      ),
+    );
+    records.add(
+      ConsumedRecord(
+        id: 'rice',
+        name: 'Rice',
+        p: 3,
+        c: 28,
+        f: 0,
+        kcal: 130,
+        mealType: 'lunch',
+        date: '2026-07-13',
+      ),
+    );
+
+    final suggestions = service.recentFoods(
+      records: records,
+      mealType: 'breakfast',
+    );
+
+    expect(suggestions.first.displayName, 'Egg');
+  });
+
+  test('empty recent history returns an empty list', () {
+    const service = NutritionQuickAccessService();
+
+    expect(service.recentFoods(records: const []), isEmpty);
+  });
+
+  test('copy plan filters by source date and meal', () {
+    const service = NutritionQuickAccessService();
+    final plan = service.copyPlan(
+      sourceDate: '2026-07-12',
+      mealType: 'breakfast',
+      records: [
+        ConsumedRecord(
+          id: '1',
+          name: 'Egg',
+          p: 6,
+          c: 1,
+          f: 5,
+          kcal: 70,
+          mealType: 'breakfast',
+          date: '2026-07-12',
+        ),
+        ConsumedRecord(
+          id: '2',
+          name: 'Rice',
+          p: 3,
+          c: 28,
+          f: 0,
+          kcal: 130,
+          mealType: 'lunch',
+          date: '2026-07-12',
+        ),
+      ],
+    );
+
+    expect(plan.records, hasLength(1));
+    expect(plan.records.single.name, 'Egg');
   });
 
   test(

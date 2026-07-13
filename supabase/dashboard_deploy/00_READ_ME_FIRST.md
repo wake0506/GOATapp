@@ -1,64 +1,74 @@
-# GOATapp Supabase Dashboard 部署包
+# GOATapp Supabase Dashboard 部署包 v2
 
-本目录是网页 Dashboard SQL Editor 的执行版本。仓库中的
-`supabase/migrations/` 和 `supabase/functions/nutrition-ai/` 仍是源码真相；本目录只为人工网页部署拆分脚本。
+本目录是供 Supabase Dashboard 网页执行的拆分版本。仓库中的
+`supabase/migrations/` 和 `supabase/functions/nutrition-ai/` 仍是源码真相，
+本目录不替代它们。本轮只生成和审查部署文件，不执行远程部署。
 
-## 执行边界
+## 已确认的数据基线
 
-- 本包不包含数据库密码、service-role key、access token 或 DeepSeek key。
-- 不要使用 Table Editor 手工创建 11 张表。
-- 不要在本轮运行 `99_emergency_rollback.sql`。
-- 不要把 service-role key 放进 Flutter；publishable key 也不能替代服务端权限控制。
-- Dashboard Edge Function Editor 没有可靠的仓库版本历史，部署前后都应以仓库源码为准。
-- 每个 SQL 文件单独粘贴执行。某一步报错后立即停止，保存错误信息，不要继续后续脚本。
+部署后必须保留以下数据：
 
-## 网页步骤
+- `user_profiles`：1 行，且至少 1 行 `training_data` 非空
+- `food_dictionary`：0 行
+- `diet_logs`：0 行
+- `exercise_logs`：0 行
+- `daily_tracking`：2 行，旧饮水兼容总量 300 ml
+- 旧饮水：1 条 legacy 汇总记录，总量 300 ml
+- 旧体重：2 条记录
+- `chat_history`：1 行
 
-### A. 备份确认
+## 重要边界
 
-1. 打开 Supabase Dashboard，确认项目名称、Project ID 和当前登录账号。
-2. 进入 **Database → Backups**，确认最近备份状态并记录备份时间。
-3. 确认有回滚负责人；没有备份确认时不要继续。
+- 不使用 Table Editor 手工创建 11 张表或修改 Policy。
+- 不运行 `99_emergency_rollback.sql`，除非项目负责人已确认备份、项目和回滚范围。
+- 任何步骤出现 `FAIL`，立即停止，不继续执行后续脚本。
+- 不把 service-role key、secret key、访问令牌或 `DEEPSEEK_API_KEY` 写入仓库、Flutter 或 SQL。
+- Dashboard Edge Function 编辑器没有可靠的仓库版本历史，部署前后都以仓库源码为准。
+- 不关闭 RLS，不使用无条件放行策略。
 
-### B. SQL Editor
+## A. 备份确认
 
-按以下顺序逐个执行，并在每一步保存结果截图或复制结果：
+1. 打开 Supabase Dashboard，确认项目和登录账号正确。
+2. 进入 **Database → Backups**，确认当前备份状态，并记录最近备份时间。
+3. 未确认备份前不要继续。
+
+## B. SQL Editor 执行顺序
+
+逐个粘贴并执行以下脚本，每一步保存截图或复制 SQL Editor 输出：
 
 1. `01_preflight_readonly.sql`
 2. `02_schema_extensions.sql`
 3. `03_new_tables.sql`
 4. `04_legacy_data_migration.sql`
 5. `05_triggers_indexes_constraints.sql`
-6. `06_rls_policies.sql`
-7. `07_rpc_and_functions.sql`
-8. `08_verification_readonly.sql`
+6. 再运行 `01_preflight_readonly.sql`，确认表、字段和现有 Policy 没有异常
+7. `06_rls_policies.sql`
+8. `07_rpc_and_functions.sql`
+9. `08_verification_readonly.sql`
 
-`01` 和 `08` 只读。所有脚本都设计为可在失败原因排除后安全重试，但仍必须逐步确认，不要盲目重复执行。
+重点：运行 `06` 前必须人工确认 `01` 的 Policy 输出。`06` 只保留已有实际表达式安全的 Policy，
+不会按名称删除、覆盖或替换；发现冲突会停止并要求人工审查。`05` 在验证历史行无违规后才会
+`VALIDATE CONSTRAINT`，发现不合法数据会回滚本次事务且不删除或修正用户数据。
 
-### C. Edge Function
+## C. Edge Function
 
 1. 进入 **Edge Functions → Deploy a new function → Via Editor**。
 2. 函数名填写 `nutrition-ai`。
-3. 粘贴 `nutrition-ai/index.ts` 的完整源码并部署。
-4. 使用 Dashboard Test 功能验证：未登录请求应返回 401；合法请求应返回 `items`、`requestId`、`provider`。
+3. 粘贴 `nutrition-ai/index.ts` 的完整内容并部署。
+4. 在 **Edge Function Secrets** 中添加 `DEEPSEEK_API_KEY`，只在 Dashboard Secret 中填写真实值。
+5. 使用 Dashboard Test 验证未登录请求返回 401，合法请求返回严格 JSON。
 
-### D. Edge Function Secret
+Edge Function 使用服务端固定限额 RPC，不接受客户端 user id、日期或限额；nutrition-ai
+幂等记录由服务端 RPC 原子声明、保存和释放，客户端不能直接写入这些行。
 
-在 **Edge Function Secrets** 中添加：
+## D. 最后验证
 
-```text
-DEEPSEEK_API_KEY=<由操作者安全输入，不要写入仓库>
-```
-
-不要在 SQL Editor、Flutter、Git、日志或 APK 中粘贴该值。
-
-### E. 最后检查
-
-再次运行 `08_verification_readonly.sql`，确认全部关键项为 `PASS`，`REVIEW` 项已人工确认，且没有执行任何回滚文件。
+再次运行 `08_verification_readonly.sql`。所有必要检查应为 `PASS`；`REVIEW` 必须在部署记录中
+由人工确认。不要运行 rollback，不要通过 Table Editor 手工补对象。
 
 ## 源码对应关系
 
-- Schema 源码：`supabase/migrations/20260713000000_backend_production.sql`
-- Function 源码：`supabase/functions/nutrition-ai/index.ts`
-- Dashboard SQL：本目录 `01` 到 `08`
+- Schema：`supabase/migrations/20260713000000_backend_production.sql`
+- Edge Function：`supabase/functions/nutrition-ai/index.ts`
+- Dashboard SQL：本目录 `01` 到 `09`
 - 回滚参考：本目录 `99_emergency_rollback.sql`

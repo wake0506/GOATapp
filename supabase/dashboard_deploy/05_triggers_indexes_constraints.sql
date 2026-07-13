@@ -3,8 +3,8 @@ Purpose: Add timestamp triggers, indexes, range checks and operation constraints
 Read-only: No.
 Data modification: Changes metadata and validates new writes; does not delete rows.
 Expected time: Under 60 seconds, depending on index size.
-Success: Updated timestamps are automatic and required checks/indexes exist.
-Failure/retry: Safe to rerun. Existing rows are not removed; NOT VALID checks need later review.
+Success: Updated timestamps are automatic and required checks/indexes exist; historical rows pass and constraints are validated.
+Failure/retry: Safe to rerun. Existing rows are not removed; invalid historical rows abort this transaction for manual review.
 */
 
 begin;
@@ -43,6 +43,51 @@ begin
     execute format(
       'alter table public.%I add constraint %I check (%s) not valid',
       table_name, constraint_name, expression
+    );
+  end if;
+end;
+$$;
+
+create or replace function public.goat_assert_constraint_clean(
+  table_name text,
+  constraint_name text,
+  expression text
+)
+returns void
+language plpgsql
+as $$
+declare
+  invalid_rows bigint;
+begin
+  execute format(
+    'select count(*) from public.%I where not (%s)',
+    table_name, expression
+  ) into invalid_rows;
+  if invalid_rows > 0 then
+    raise exception 'CONSTRAINT_REVIEW_REQUIRED: %.% has % invalid existing rows',
+      table_name, constraint_name, invalid_rows;
+  end if;
+end;
+$$;
+
+create or replace function public.goat_validate_constraint_if_needed(
+  table_name text,
+  constraint_name text
+)
+returns void
+language plpgsql
+as $$
+begin
+  if exists (
+    select 1 from pg_constraint c
+    join pg_class r on r.oid = c.conrelid
+    join pg_namespace n on n.oid = r.relnamespace
+    where n.nspname = 'public' and r.relname = table_name
+      and c.conname = constraint_name and not c.convalidated
+  ) then
+    execute format(
+      'alter table public.%I validate constraint %I',
+      table_name, constraint_name
     );
   end if;
 end;
@@ -99,6 +144,43 @@ select public.goat_add_check_if_missing('ai_usage_daily', 'ai_usage_nonnegative'
 select public.goat_add_check_if_missing('client_operations', 'client_operations_action_valid',
   'action in (''upsert'', ''delete'')');
 
+-- Check all historical rows before validating any NOT VALID constraint. An
+-- exception aborts this transaction and leaves the user's data unchanged.
+select public.goat_assert_constraint_clean('user_profiles', 'user_profiles_weight_range',
+  'current_weight >= 20 and current_weight <= 300');
+select public.goat_assert_constraint_clean('food_dictionary', 'food_dictionary_nutrition_nonnegative',
+  'protein >= 0 and carbs >= 0 and fat >= 0 and calories >= 0');
+select public.goat_assert_constraint_clean('diet_logs', 'diet_logs_nutrition_nonnegative',
+  'p >= 0 and c >= 0 and f >= 0 and kcal >= 0 and amount >= 0');
+select public.goat_assert_constraint_clean('diet_logs', 'diet_logs_meal_type_valid',
+  'meal_type in (''早餐'', ''午餐'', ''晚餐'', ''加餐'')');
+select public.goat_assert_constraint_clean('exercise_logs', 'exercise_logs_kcal_nonnegative',
+  'kcal >= 0');
+select public.goat_assert_constraint_clean('daily_tracking', 'daily_tracking_water_nonnegative',
+  'water_ml >= 0');
+select public.goat_assert_constraint_clean('daily_tracking', 'daily_tracking_weight_range',
+  'weight_kg = 0 or (weight_kg >= 20 and weight_kg <= 300)');
+select public.goat_assert_constraint_clean('water_intake_records', 'water_intake_amount_range',
+  'amount_ml > 0 and amount_ml <= 10000');
+select public.goat_assert_constraint_clean('body_weight_logs', 'body_weight_range',
+  'weight_kg >= 20 and weight_kg <= 300');
+select public.goat_assert_constraint_clean('ai_usage_daily', 'ai_usage_nonnegative',
+  'request_count >= 0');
+select public.goat_assert_constraint_clean('client_operations', 'client_operations_action_valid',
+  'action in (''upsert'', ''delete'')');
+
+select public.goat_validate_constraint_if_needed('user_profiles', 'user_profiles_weight_range');
+select public.goat_validate_constraint_if_needed('food_dictionary', 'food_dictionary_nutrition_nonnegative');
+select public.goat_validate_constraint_if_needed('diet_logs', 'diet_logs_nutrition_nonnegative');
+select public.goat_validate_constraint_if_needed('diet_logs', 'diet_logs_meal_type_valid');
+select public.goat_validate_constraint_if_needed('exercise_logs', 'exercise_logs_kcal_nonnegative');
+select public.goat_validate_constraint_if_needed('daily_tracking', 'daily_tracking_water_nonnegative');
+select public.goat_validate_constraint_if_needed('daily_tracking', 'daily_tracking_weight_range');
+select public.goat_validate_constraint_if_needed('water_intake_records', 'water_intake_amount_range');
+select public.goat_validate_constraint_if_needed('body_weight_logs', 'body_weight_range');
+select public.goat_validate_constraint_if_needed('ai_usage_daily', 'ai_usage_nonnegative');
+select public.goat_validate_constraint_if_needed('client_operations', 'client_operations_action_valid');
+
 do $$
 declare
   table_name text;
@@ -126,5 +208,10 @@ begin
     end if;
   end loop;
 end $$;
+
+revoke all on function public.goat_set_updated_at() from public;
+revoke all on function public.goat_add_check_if_missing(text, text, text) from public;
+revoke all on function public.goat_assert_constraint_clean(text, text, text) from public;
+revoke all on function public.goat_validate_constraint_if_needed(text, text) from public;
 
 commit;

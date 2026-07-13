@@ -2,13 +2,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEXT_LENGTH = 8_000;
-const DAILY_LIMIT = 50;
 const TIMEOUT_MS = 20_000;
 const MEAL_TYPES = new Set(['早餐', '午餐', '晚餐', '加餐']);
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
 export type ValidatedAiItem = {
@@ -130,7 +130,7 @@ export function createNutritionAiHandler(
     let body: { text: string; defaultMealType: string; clientRequestId: string };
     try {
       const raw = await request.json();
-      if (JSON.stringify(raw).length > MAX_BODY_BYTES) {
+      if (new TextEncoder().encode(JSON.stringify(raw)).byteLength > MAX_BODY_BYTES) {
         return errorResponse('REQUEST_TOO_LARGE', '请求内容过大', 413, requestId);
       }
       body = parseRequestBody(raw);
@@ -147,31 +147,60 @@ export function createNutritionAiHandler(
       return errorResponse(code, '请求参数无效', 400, requestId);
     }
 
-    const cached = await supabase
-      .from('client_operations')
-      .select('response')
-      .eq('user_id', userId)
-      .eq('operation_id', body.clientRequestId)
-      .maybeSingle();
-    if (cached.data?.response && typeof cached.data.response === 'object') {
-      return responseBody(cached.data.response as Record<string, unknown>, 200);
-    }
-
-    const quota = await supabase.rpc('consume_ai_quota', {
-      p_user_id: userId,
-      p_date: new Date().toISOString().slice(0, 10),
-      p_limit: DAILY_LIMIT,
+    const cached = await supabase.rpc('nutrition_ai_get_cached_response', {
+      p_client_request_id: body.clientRequestId,
     });
-    if (quota.error) {
-      console.error(JSON.stringify({ code: 'QUOTA_CHECK_FAILED', requestId }));
+    if (cached.error) {
+      console.error(JSON.stringify({ code: 'CACHE_READ_FAILED', requestId }));
       return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
     }
-    if (quota.data !== true) {
-      return errorResponse('RATE_LIMITED', '今日 AI 解析次数已用完', 429, requestId);
+    if (cached.data && typeof cached.data === 'object') {
+      return responseBody(cached.data as Record<string, unknown>, 200);
     }
 
     const providerKey = Deno.env.get('DEEPSEEK_API_KEY');
     if (!providerKey) return errorResponse('AI_NOT_CONFIGURED', 'AI 服务暂未配置', 503, requestId);
+
+    const claim = await supabase.rpc('nutrition_ai_claim_operation', {
+      p_client_request_id: body.clientRequestId,
+    });
+    if (claim.error) {
+      console.error(JSON.stringify({ code: 'IDEMPOTENCY_CLAIM_FAILED', requestId }));
+      return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+    }
+    if (claim.data !== true) {
+      const concurrent = await supabase.rpc('nutrition_ai_get_cached_response', {
+        p_client_request_id: body.clientRequestId,
+      });
+      if (concurrent.error) {
+        console.error(JSON.stringify({ code: 'CACHE_RECHECK_FAILED', requestId }));
+        return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+      }
+      if (concurrent.data && typeof concurrent.data === 'object') {
+        return responseBody(concurrent.data as Record<string, unknown>, 200);
+      }
+      return errorResponse('REQUEST_IN_PROGRESS', '请求正在处理中', 409, requestId);
+    }
+
+    const releaseOperation = async () => {
+      const released = await supabase.rpc('nutrition_ai_release_operation', {
+        p_client_request_id: body.clientRequestId,
+      });
+      if (released.error) {
+        console.error(JSON.stringify({ code: 'IDEMPOTENCY_RELEASE_FAILED', requestId }));
+      }
+    };
+
+    const quota = await supabase.rpc('consume_ai_quota');
+    if (quota.error) {
+      await releaseOperation();
+      console.error(JSON.stringify({ code: 'QUOTA_CHECK_FAILED', requestId }));
+      return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+    }
+    if (quota.data !== true) {
+      await releaseOperation();
+      return errorResponse('RATE_LIMITED', '今日 AI 解析次数已用完', 429, requestId);
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -197,6 +226,7 @@ export function createNutritionAiHandler(
         }),
       });
       if (!providerResponse.ok) {
+        await releaseOperation();
         console.error(JSON.stringify({ code: 'PROVIDER_HTTP_ERROR', status: providerResponse.status, requestId }));
         return errorResponse('AI_PROVIDER_ERROR', 'AI 解析暂时失败，请稍后重试', 502, requestId);
       }
@@ -205,20 +235,18 @@ export function createNutritionAiHandler(
       if (typeof content !== 'string') throw new Error('INVALID_PROVIDER_RESPONSE');
       const items = validateAiItems(JSON.parse(stripFence(content)));
       const result = { items, requestId, provider: 'deepseek' };
-      const saved = await supabase.from('client_operations').insert({
-        operation_id: body.clientRequestId,
-        user_id: userId,
-        entity_type: 'nutrition-ai',
-        entity_id: body.clientRequestId,
-        action: 'upsert',
-        payload: {},
-        response: result,
+      const saved = await supabase.rpc('nutrition_ai_save_response', {
+        p_client_request_id: body.clientRequestId,
+        p_response: result,
       });
-      if (saved.error) {
+      if (saved.error || saved.data !== true) {
+        await releaseOperation();
         console.error(JSON.stringify({ code: 'IDEMPOTENCY_SAVE_FAILED', requestId }));
+        return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
       }
       return responseBody(result, 200);
     } catch (error) {
+      await releaseOperation();
       const isTimeout = error instanceof DOMException && error.name === 'AbortError';
       console.error(JSON.stringify({ code: isTimeout ? 'PROVIDER_TIMEOUT' : 'INVALID_PROVIDER_RESPONSE', requestId }));
       return errorResponse(

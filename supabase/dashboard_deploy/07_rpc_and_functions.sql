@@ -22,28 +22,59 @@ begin
     execute 'revoke all on function public.consume_ai_quota(uuid, date, integer) from anon';
     execute 'revoke all on function public.consume_ai_quota(uuid, date, integer) from authenticated';
   end if;
+  if to_regprocedure('public.consume_ai_quota_for_user(uuid)') is not null then
+    execute 'revoke all on function public.consume_ai_quota_for_user(uuid) from public';
+    execute 'revoke all on function public.consume_ai_quota_for_user(uuid) from anon';
+    execute 'revoke all on function public.consume_ai_quota_for_user(uuid) from authenticated';
+  end if;
 end $$;
 
 create or replace function public.consume_ai_quota_for_user(
-  p_user_id uuid
+  p_user_id uuid,
+  p_request_id text
 )
 returns boolean
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  is_allowed boolean;
 begin
-  if p_user_id is null then
-    raise exception 'invalid_user_id';
+  if p_user_id is null or p_request_id is null
+     or pg_catalog.length(pg_catalog.btrim(p_request_id)) = 0
+     or pg_catalog.length(p_request_id) > 128 then
+    raise exception 'invalid_quota_arguments';
   end if;
 
-  insert into public.ai_usage_daily (user_id, date, request_count)
-  values (p_user_id, current_date, 1)
+  insert into public.ai_usage_daily as usage (
+    user_id, date, request_count, client_operation_ids
+  )
+  values (
+    p_user_id,
+    current_date,
+    1,
+    pg_catalog.jsonb_build_array(p_request_id)
+  )
   on conflict (user_id, date) do update
-    set request_count = public.ai_usage_daily.request_count + 1
-    where public.ai_usage_daily.request_count < 50;
+    set request_count = case
+          when coalesce(usage.client_operation_ids, '[]'::jsonb) @> pg_catalog.jsonb_build_array(p_request_id)
+            then usage.request_count
+          when usage.request_count < 50 then usage.request_count + 1
+          else usage.request_count
+        end,
+        client_operation_ids = case
+          when coalesce(usage.client_operation_ids, '[]'::jsonb) @> pg_catalog.jsonb_build_array(p_request_id)
+            then coalesce(usage.client_operation_ids, '[]'::jsonb)
+          when usage.request_count < 50
+            then coalesce(usage.client_operation_ids, '[]'::jsonb) || pg_catalog.jsonb_build_array(p_request_id)
+          else coalesce(usage.client_operation_ids, '[]'::jsonb)
+        end
+    where coalesce(usage.client_operation_ids, '[]'::jsonb) @> pg_catalog.jsonb_build_array(p_request_id)
+       or usage.request_count < 50
+  returning true into is_allowed;
 
-  return found;
+  return coalesce(is_allowed, false);
 end;
 $$;
 
@@ -86,7 +117,7 @@ begin
     raise exception 'invalid_claim_arguments';
   end if;
 
-  new_claim_token := public.gen_random_uuid();
+  new_claim_token := pg_catalog.gen_random_uuid();
   insert into public.client_operations (
     operation_id, user_id, entity_type, entity_id, action, payload,
     response, claimed_at, claim_token
@@ -132,7 +163,7 @@ begin
     );
   end if;
 
-  new_claim_token := public.gen_random_uuid();
+  new_claim_token := pg_catalog.gen_random_uuid();
   update public.client_operations as c
   set claimed_at = now(),
       claim_token = new_claim_token,
@@ -208,10 +239,10 @@ end;
 $$;
 
 -- AI RPCs are service-role-only. No client role receives execute permission.
-revoke all on function public.consume_ai_quota_for_user(uuid) from public;
-revoke all on function public.consume_ai_quota_for_user(uuid) from anon;
-revoke all on function public.consume_ai_quota_for_user(uuid) from authenticated;
-grant execute on function public.consume_ai_quota_for_user(uuid) to service_role;
+revoke all on function public.consume_ai_quota_for_user(uuid, text) from public;
+revoke all on function public.consume_ai_quota_for_user(uuid, text) from anon;
+revoke all on function public.consume_ai_quota_for_user(uuid, text) from authenticated;
+grant execute on function public.consume_ai_quota_for_user(uuid, text) to service_role;
 
 revoke all on function public.nutrition_ai_get_cached_response(uuid, text) from public;
 revoke all on function public.nutrition_ai_get_cached_response(uuid, text) from anon;

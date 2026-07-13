@@ -1,4 +1,4 @@
-# GOATapp Supabase Dashboard 部署包 v2
+# GOATapp Supabase Dashboard 部署包 v5
 
 本目录是供 Supabase Dashboard 网页执行的拆分版本。仓库中的
 `supabase/migrations/` 和 `supabase/functions/nutrition-ai/` 仍是源码真相，
@@ -10,8 +10,14 @@
 `delete_user()`，账号注销需单独安全审计。
 
 本 v4 包进一步将 AI RPC 限制为 `service_role`，Edge Function 使用用户 client
-验证 JWT、使用 admin client 调用 RPC；`SUPABASE_SECRET_KEYS` 优先，兼容
-`SUPABASE_SERVICE_ROLE_KEY`。legacy 饮水记录的 `recorded_at` 为 NULL，不代表具体时间。
+验证 JWT、使用 admin client 调用 RPC。legacy 饮水记录的 `recorded_at` 为 NULL，
+不代表具体时间。
+
+本 v5 包在 `03` 建表事务内立即启用全部 11 张用户表的 RLS；AI 配额按
+`clientRequestId` 原子幂等计数，重复请求不重复消耗每日 50 次额度。Edge Function
+优先使用平台标准 `SUPABASE_SERVICE_ROLE_KEY`，仅兼容回退 `SUPABASE_SECRET_KEYS`；
+不需要、也不得将任何密钥粘贴进函数源码。`08` 只输出一张汇总结果表，便于在 Dashboard
+一次审阅所有 PASS、FAIL 和 REVIEW。
 
 ## 已确认的数据基线
 
@@ -67,8 +73,9 @@
 4. 在 **Edge Function Secrets** 中添加 `DEEPSEEK_API_KEY`，只在 Dashboard Secret 中填写真实值。
 5. 使用 Dashboard Test 验证未登录请求返回 401，合法请求返回严格 JSON。
 
-Edge Function 使用服务端固定限额 RPC，不接受客户端 user id、日期或限额；nutrition-ai
-幂等记录由服务端 RPC 原子声明、保存和释放，客户端不能直接写入这些行。
+Edge Function 使用服务端固定限额 RPC；它先用用户 JWT 验证身份，再把已验证的用户 ID 和
+`clientRequestId` 交给 service-role RPC。nutrition-ai 幂等记录由服务端原子声明、保存和
+释放，客户端不能直接写入这些行。
 
 ## D. 最后验证
 

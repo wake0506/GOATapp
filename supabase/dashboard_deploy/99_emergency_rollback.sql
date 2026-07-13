@@ -47,7 +47,7 @@ their names happen to match.
 -- alter table public.water_intake_records drop constraint if exists water_intake_legacy_time_consistent;
 
 -- RPC/helper metadata: only remove functions created by this package after review.
--- drop function if exists public.consume_ai_quota_for_user(uuid);
+-- drop function if exists public.consume_ai_quota_for_user(uuid, text);
 -- drop function if exists public.nutrition_ai_get_cached_response(uuid, text);
 -- drop function if exists public.nutrition_ai_claim_operation(uuid, text);
 -- drop function if exists public.nutrition_ai_save_response(uuid, text, uuid, jsonb);

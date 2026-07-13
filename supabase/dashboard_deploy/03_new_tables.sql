@@ -9,8 +9,6 @@ Failure/retry: Safe to rerun. Do not manually create duplicate tables in Table E
 
 begin;
 
-create extension if not exists pgcrypto;
-
 create table if not exists public.user_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   gender text not null default '男',
@@ -180,5 +178,21 @@ alter table public.client_operations
   add column if not exists claimed_at timestamptz;
 alter table public.client_operations
   add column if not exists claim_token uuid;
+alter table public.ai_usage_daily
+  add column if not exists client_operation_ids jsonb not null default '[]'::jsonb;
+
+-- RLS starts at table creation time. 06_rls_policies.sql only audits and
+-- adds the minimum missing policies, so no user table has an unprotected gap.
+alter table public.user_profiles enable row level security;
+alter table public.food_dictionary enable row level security;
+alter table public.diet_logs enable row level security;
+alter table public.exercise_logs enable row level security;
+alter table public.daily_tracking enable row level security;
+alter table public.water_intake_records enable row level security;
+alter table public.body_weight_logs enable row level security;
+alter table public.training_sessions enable row level security;
+alter table public.sync_tombstones enable row level security;
+alter table public.client_operations enable row level security;
+alter table public.ai_usage_daily enable row level security;
 
 commit;

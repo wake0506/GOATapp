@@ -1,4 +1,5 @@
 import {
+  createNutritionAiHandler,
   parseRequestBody,
   validateCachedResponse,
   validateAiItems,
@@ -142,5 +143,14 @@ Deno.test('malformed cached response is rejected', () => {
     if (!(error instanceof Error) || error.message !== 'INVALID_PROVIDER_RESPONSE') {
       throw error;
     }
+  }
+});
+
+Deno.test('OPTIONS preflight has no response body', async () => {
+  const response = await createNutritionAiHandler()(
+    new Request('https://example.invalid/nutrition-ai', { method: 'OPTIONS' }),
+  );
+  if (response.status !== 204 || (await response.text()) !== '') {
+    throw new Error('preflight must return an empty 204 response');
   }
 });

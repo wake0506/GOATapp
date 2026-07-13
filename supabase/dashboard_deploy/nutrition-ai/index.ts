@@ -152,7 +152,9 @@ export function createNutritionAiHandler(
   fetchImpl: typeof fetch = fetch,
 ): (request: Request) => Promise<Response> {
   return async (request: Request) => {
-    if (request.method === 'OPTIONS') return responseBody({}, 204);
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: JSON_HEADERS });
+    }
     if (request.method !== 'POST') {
       return errorResponse('METHOD_NOT_ALLOWED', '仅支持 POST 请求', 405);
     }
@@ -198,8 +200,8 @@ export function createNutritionAiHandler(
 
     const providerKey = Deno.env.get('DEEPSEEK_API_KEY');
     const secretKey =
-      Deno.env.get('SUPABASE_SECRET_KEYS') ??
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
+      Deno.env.get('SUPABASE_SECRET_KEYS');
     if (!providerKey || !secretKey) {
       return errorResponse('AI_NOT_CONFIGURED', 'AI 服务暂未配置', 503, requestId);
     }
@@ -269,6 +271,7 @@ export function createNutritionAiHandler(
 
       const quota = await adminClient.rpc('consume_ai_quota_for_user', {
         p_user_id: userId,
+        p_request_id: body.clientRequestId,
       });
       if (quota.error) {
         await releaseOperation();

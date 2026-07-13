@@ -32,7 +32,7 @@ begin;
 --   (id, user_id, date, recorded_at, amount_ml)
 -- values ('smoke-water-invalid', 'TEST_USER_UUID', current_date, now(), -1);
 
--- v4 AI lease tests. These require service_role and must remain inside this
+-- v5 AI lease tests. These require service_role and must remain inside this
 -- transaction. Do not run them with an application JWT.
 -- set local role service_role;
 -- select public.nutrition_ai_claim_operation(
@@ -76,7 +76,22 @@ begin;
 -- select public.nutrition_ai_claim_operation(
 --   'TEST_USER_UUID'::uuid, 'smoke-auth-denied'
 -- );
--- select public.consume_ai_quota_for_user('TEST_USER_UUID'::uuid);
+-- select public.consume_ai_quota_for_user(
+--   'TEST_USER_UUID'::uuid, 'smoke-auth-denied'
+-- );
+
+-- Quota idempotency test: the first and repeated call below must both return
+-- true, but only the first call adds this request ID and increments the count.
+-- set local role service_role;
+-- select public.consume_ai_quota_for_user(
+--   'TEST_USER_UUID'::uuid, 'smoke-quota-request-1'
+-- ); -- expect true and one count increment.
+-- select public.consume_ai_quota_for_user(
+--   'TEST_USER_UUID'::uuid, 'smoke-quota-request-1'
+-- ); -- expect true and no second count increment.
+-- select request_count, client_operation_ids
+-- from public.ai_usage_daily
+-- where user_id = 'TEST_USER_UUID'::uuid and date = current_date;
 
 -- Idempotency example: the second insert should fail on the unique operation index.
 -- insert into public.food_dictionary

@@ -788,15 +788,13 @@ class _MainTabControllerState extends State<MainTabController>
       sessions: allTrainingSessions,
       businessDate: viewDateStr,
       onStartTraining: () => _showAddTrainingSessionSheet(viewDateStr),
-      onAddRecord: () => _showAddTrainingSessionSheet(viewDateStr),
-      onAddTemplate: () =>
-          _showAddTrainingSessionSheet(viewDateStr, initialName: '自定义训练'),
+      onUsePplTemplate: () =>
+          _showAddTrainingSessionSheet(viewDateStr, initialName: 'PPL-推力日'),
+      onUseFullBodyTemplate: () =>
+          _showAddTrainingSessionSheet(viewDateStr, initialName: '全身循环燃脂'),
       onViewHistory: _showTrainingHistorySheet,
-      onSelectTemplate: (template) => _showAddTrainingSessionSheet(
-        viewDateStr,
-        initialName: '${template.title}部训练',
-      ),
-      onOpenSession: _showTrainingSessionDetails,
+      onManageTemplates: () =>
+          _showAddTrainingSessionSheet(viewDateStr, initialName: '自定义训练'),
     );
   }
 

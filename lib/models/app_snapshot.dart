@@ -4,6 +4,7 @@ import 'food_item.dart';
 import 'json_value.dart';
 import 'pending_cloud_deletes.dart';
 import 'training.dart';
+import 'water_intake_record.dart';
 
 class AppSnapshot {
   final String gender;
@@ -23,6 +24,7 @@ class AppSnapshot {
   final List<ConsumedRecord> consumed;
   final List<ExerciseRecord> exercises;
   final List<TrainingSession> training;
+  final List<WaterIntakeRecord> waterRecords;
   final Map<String, int> water;
   final Map<String, double> weight;
   final PendingCloudDeletes pendingCloudDeletes;
@@ -45,6 +47,7 @@ class AppSnapshot {
     required this.consumed,
     required this.exercises,
     required this.training,
+    required this.waterRecords,
     required this.water,
     required this.weight,
     this.pendingCloudDeletes = const PendingCloudDeletes.empty(),
@@ -68,6 +71,7 @@ class AppSnapshot {
     consumed: const [],
     exercises: const [],
     training: const [],
+    waterRecords: const [],
     water: const {},
     weight: const {},
     pendingCloudDeletes: const PendingCloudDeletes.empty(),
@@ -78,6 +82,7 @@ class AppSnapshot {
       consumed.isNotEmpty ||
       exercises.isNotEmpty ||
       training.isNotEmpty ||
+      waterRecords.isNotEmpty ||
       water.isNotEmpty ||
       weight.isNotEmpty ||
       searchHistory.isNotEmpty;
@@ -100,39 +105,54 @@ class AppSnapshot {
     'consumed': consumed.map((e) => e.toJson()).toList(),
     'exercises': exercises.map((e) => e.toJson()).toList(),
     'training': training.map((e) => e.toJson()).toList(),
+    'waterRecords': waterRecords.map((e) => e.toJson()).toList(),
     'water': water,
     'weight': weight,
     'pendingCloudDeletes': pendingCloudDeletes.toJson(),
   };
 
-  factory AppSnapshot.fromJson(Map<String, dynamic> json) => AppSnapshot(
-    gender: stringValue(json['gender'], '男'),
-    birthYear: intValue(json['birthYear'], 2000),
-    birthMonth: intValue(json['birthMonth'], 1),
-    birthDay: intValue(json['birthDay'], 1),
-    height: doubleValue(json['height'], 175),
-    currentWeight: doubleValue(json['currentWeight'], 70),
-    searchHistory: (json['searchHistory'] as List<dynamic>? ?? const [])
-        .map((e) => e.toString())
-        .toList(),
-    targetP: doubleValue(json['targetP'], 150),
-    targetC: doubleValue(json['targetC'], 200),
-    targetF: doubleValue(json['targetF'], 60),
-    targetKcal: doubleValue(json['targetKcal'], 2000),
-    resetHour: intValue(json['resetHour']),
-    aiDismissedDate: stringValue(json['aiDismissedDate']),
-    foods: _objects(json['foods']).map(FoodItem.fromJson).toList(),
-    consumed: _objects(json['consumed']).map(ConsumedRecord.fromJson).toList(),
-    exercises: _objects(
-      json['exercises'],
-    ).map(ExerciseRecord.fromJson).toList(),
-    training: _objects(json['training']).map(TrainingSession.fromJson).toList(),
-    water: _intMap(json['water']),
-    weight: _doubleMap(json['weight']),
-    pendingCloudDeletes: PendingCloudDeletes.fromJson(
-      json['pendingCloudDeletes'],
-    ),
-  );
+  factory AppSnapshot.fromJson(Map<String, dynamic> json) {
+    final legacyWater = _intMap(json['water']);
+    final decodedWater = _objects(
+      json['waterRecords'],
+    ).map(WaterIntakeRecord.fromJson).toList();
+    final waterRecords = decodedWater.isNotEmpty
+        ? decodedWater
+        : migrateWaterAggregates(legacyWater);
+    return AppSnapshot(
+      gender: stringValue(json['gender'], '男'),
+      birthYear: intValue(json['birthYear'], 2000),
+      birthMonth: intValue(json['birthMonth'], 1),
+      birthDay: intValue(json['birthDay'], 1),
+      height: doubleValue(json['height'], 175),
+      currentWeight: doubleValue(json['currentWeight'], 70),
+      searchHistory: (json['searchHistory'] as List<dynamic>? ?? const [])
+          .map((e) => e.toString())
+          .toList(),
+      targetP: doubleValue(json['targetP'], 150),
+      targetC: doubleValue(json['targetC'], 200),
+      targetF: doubleValue(json['targetF'], 60),
+      targetKcal: doubleValue(json['targetKcal'], 2000),
+      resetHour: intValue(json['resetHour']),
+      aiDismissedDate: stringValue(json['aiDismissedDate']),
+      foods: _objects(json['foods']).map(FoodItem.fromJson).toList(),
+      consumed: _objects(
+        json['consumed'],
+      ).map(ConsumedRecord.fromJson).toList(),
+      exercises: _objects(
+        json['exercises'],
+      ).map(ExerciseRecord.fromJson).toList(),
+      training: _objects(
+        json['training'],
+      ).map(TrainingSession.fromJson).toList(),
+      waterRecords: waterRecords,
+      water: waterTotals(waterRecords),
+      weight: _doubleMap(json['weight']),
+      pendingCloudDeletes: PendingCloudDeletes.fromJson(
+        json['pendingCloudDeletes'],
+      ),
+    );
+  }
 
   AppSnapshot merge(AppSnapshot other) => AppSnapshot(
     gender: gender == '男' && other.gender != '男' ? other.gender : gender,
@@ -154,7 +174,10 @@ class AppSnapshot {
     consumed: _mergeById(consumed, other.consumed, (e) => e.id),
     exercises: _mergeById(exercises, other.exercises, (e) => e.id),
     training: _mergeById(training, other.training, (e) => e.id),
-    water: {...other.water, ...water},
+    waterRecords: _mergeById(waterRecords, other.waterRecords, (e) => e.id),
+    water: waterTotals(
+      _mergeById(waterRecords, other.waterRecords, (e) => e.id),
+    ),
     weight: {...other.weight, ...weight},
     pendingCloudDeletes: pendingCloudDeletes.merge(other.pendingCloudDeletes),
   );

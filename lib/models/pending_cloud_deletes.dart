@@ -2,12 +2,14 @@ class PendingCloudDeletes {
   final Set<String> foodIds;
   final Set<String> dietRecordIds;
   final Set<String> exerciseRecordIds;
+  final Set<String> waterRecordIds;
   final Set<String> trackingDates;
 
   const PendingCloudDeletes({
     this.foodIds = const {},
     this.dietRecordIds = const {},
     this.exerciseRecordIds = const {},
+    this.waterRecordIds = const {},
     this.trackingDates = const {},
   });
 
@@ -17,18 +19,21 @@ class PendingCloudDeletes {
       foodIds.isEmpty &&
       dietRecordIds.isEmpty &&
       exerciseRecordIds.isEmpty &&
+      waterRecordIds.isEmpty &&
       trackingDates.isEmpty;
 
   PendingCloudDeletes copyWith({
     Set<String>? foodIds,
     Set<String>? dietRecordIds,
     Set<String>? exerciseRecordIds,
+    Set<String>? waterRecordIds,
     Set<String>? trackingDates,
   }) {
     return PendingCloudDeletes(
       foodIds: foodIds ?? this.foodIds,
       dietRecordIds: dietRecordIds ?? this.dietRecordIds,
       exerciseRecordIds: exerciseRecordIds ?? this.exerciseRecordIds,
+      waterRecordIds: waterRecordIds ?? this.waterRecordIds,
       trackingDates: trackingDates ?? this.trackingDates,
     );
   }
@@ -37,6 +42,7 @@ class PendingCloudDeletes {
     'foodIds': foodIds.toList(),
     'dietRecordIds': dietRecordIds.toList(),
     'exerciseRecordIds': exerciseRecordIds.toList(),
+    'waterRecordIds': waterRecordIds.toList(),
     'trackingDates': trackingDates.toList(),
   };
 
@@ -52,6 +58,7 @@ class PendingCloudDeletes {
       foodIds: readSet(value['foodIds']),
       dietRecordIds: readSet(value['dietRecordIds']),
       exerciseRecordIds: readSet(value['exerciseRecordIds']),
+      waterRecordIds: readSet(value['waterRecordIds']),
       trackingDates: readSet(value['trackingDates']),
     );
   }
@@ -63,6 +70,7 @@ class PendingCloudDeletes {
       exerciseRecordIds: exerciseRecordIds.difference(
         processed.exerciseRecordIds,
       ),
+      waterRecordIds: waterRecordIds.difference(processed.waterRecordIds),
       trackingDates: trackingDates.difference(processed.trackingDates),
     );
   }
@@ -72,6 +80,7 @@ class PendingCloudDeletes {
       foodIds: {...foodIds, ...other.foodIds},
       dietRecordIds: {...dietRecordIds, ...other.dietRecordIds},
       exerciseRecordIds: {...exerciseRecordIds, ...other.exerciseRecordIds},
+      waterRecordIds: {...waterRecordIds, ...other.waterRecordIds},
       trackingDates: {...trackingDates, ...other.trackingDates},
     );
   }

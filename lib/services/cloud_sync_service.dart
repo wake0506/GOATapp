@@ -120,7 +120,10 @@ class CloudSyncService {
           .inFilter('date', pendingDates);
     }
 
-    return snapshot.pendingCloudDeletes;
+    // The current Supabase schema has no per-intake water table. Keep those
+    // local pending deletes until that table is available; daily_tracking
+    // continues to receive the derived aggregate for compatibility.
+    return snapshot.pendingCloudDeletes.copyWith(waterRecordIds: const {});
   }
 
   Future<void> _syncTable<T>({

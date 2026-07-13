@@ -7,6 +7,12 @@ import '../../repositories/nutrition_repository.dart';
 import '../../services/nutrition_ai_service.dart';
 import '../../services/speech_recognition_service.dart';
 
+String nextMealType(String current) {
+  const mealTypes = ['早餐', '午餐', '晚餐', '加餐'];
+  final index = mealTypes.indexOf(current);
+  return mealTypes[(index + 1) % mealTypes.length];
+}
+
 Future<void> showVoiceEntrySheet({
   required BuildContext context,
   required String mealType,
@@ -55,6 +61,32 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
   List<ParsedDietItem> _items = [];
   String? _error;
   bool _isSaving = false;
+  late String _mealType = widget.initialMealType;
+
+  static const _mealTypes = ['早餐', '午餐', '晚餐', '加餐'];
+
+  String get _mealShortLabel {
+    switch (_mealType) {
+      case '早餐':
+        return '早';
+      case '午餐':
+        return '中';
+      case '晚餐':
+        return '晚';
+      default:
+        return '加餐';
+    }
+  }
+
+  void _cycleMealType() {
+    final next = nextMealType(_mealType);
+    setState(() {
+      _mealType = next;
+      for (final item in _items) {
+        item.mealType = next;
+      }
+    });
+  }
 
   bool get _isListening => _speechState == SpeechState.listening;
   bool get _isBusy =>
@@ -148,11 +180,16 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
     try {
       final items = await widget.nutritionService.parseDietText(
         _textController.text,
-        defaultMealType: widget.initialMealType,
+        defaultMealType: _mealType,
       );
       if (!mounted) return;
       setState(() {
         _items = items;
+        if (items.isNotEmpty &&
+            items.every((item) => item.mealType.isNotEmpty)) {
+          final recognizedMeal = items.first.mealType;
+          if (_mealTypes.contains(recognizedMeal)) _mealType = recognizedMeal;
+        }
         _speechState = SpeechState.preview;
       });
     } catch (error) {
@@ -231,11 +268,25 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
                         ),
                       ),
                     ),
-                    Text(
-                      widget.initialMealType,
-                      style: const TextStyle(
-                        color: Color(0xFF008C8C),
-                        fontWeight: FontWeight.w600,
+                    InkWell(
+                      onTap: _isBusy ? null : _cycleMealType,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF008C8C).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          _mealShortLabel,
+                          style: const TextStyle(
+                            color: Color(0xFF008C8C),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -314,12 +365,27 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
                   ),
                   const SizedBox(height: 8),
                   ..._items.asMap().entries.map(
-                    (entry) => _ParsedDietItemEditor(
+                    (entry) => Column(
                       key: ValueKey(entry.key),
-                      item: entry.value,
-                      onChanged: () => setState(() {}),
-                      onDelete: () =>
-                          setState(() => _items.removeAt(entry.key)),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4, bottom: 4),
+                          child: Text(
+                            '餐次：${entry.value.mealType}',
+                            style: const TextStyle(
+                              color: Color(0xFF008C8C),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        _ParsedDietItemEditor(
+                          item: entry.value,
+                          onChanged: () => setState(() {}),
+                          onDelete: () =>
+                              setState(() => _items.removeAt(entry.key)),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 8),

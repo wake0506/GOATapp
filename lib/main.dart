@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'exercise_catalog.dart';
+import 'data/builtin_food_database.dart';
 import 'dart:async'; // 用于 Timer
 import 'package:flutter/services.dart'; // 用于 HapticFeedback 震动
 import 'models/consumed_record.dart';
@@ -15,13 +16,19 @@ import 'models/exercise_record.dart';
 import 'models/food_item.dart';
 import 'models/statistics_period.dart';
 import 'models/training.dart';
+import 'models/water_intake_record.dart';
 import 'models/app_snapshot.dart';
 import 'models/parsed_diet_item.dart';
 import 'models/pending_cloud_deletes.dart';
 import 'features/nutrition/nutrition_quick_add_sheet.dart';
 import 'features/nutrition/copy_diet_sheet.dart';
 import 'features/nutrition/edit_diet_record_sheet.dart';
+import 'features/voice_entry/voice_entry_sheet.dart';
+import 'features/tracking/weight_picker_sheet.dart';
+import 'features/training/exercise_time.dart';
+import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
+import 'repositories/water_tracking_repository.dart';
 import 'services/cloud_sync_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/nutrition_ai_service.dart';
@@ -108,7 +115,7 @@ class MainTabController extends StatefulWidget {
 
 class _MainTabControllerState extends State<MainTabController>
     with WidgetsBindingObserver
-    implements NutritionRepository {
+    implements NutritionRepository, WaterTrackingRepository {
   final supabase = Supabase.instance.client;
   late final CloudSyncService _cloudSyncService = CloudSyncService(supabase);
   final DeviceSpeechRecognitionService _speechService =
@@ -182,7 +189,7 @@ class _MainTabControllerState extends State<MainTabController>
   List<ConsumedRecord> allConsumedItems = [];
   List<ExerciseRecord> allExerciseItems = [];
   List<TrainingSession> allTrainingSessions = [];
-  Map<String, int> dailyWater = {};
+  List<WaterIntakeRecord> waterIntakeRecords = [];
   Map<String, double> dailyWeight = {};
   List<String> searchHistory = [];
   PendingCloudDeletes _pendingCloudDeletes = const PendingCloudDeletes.empty();
@@ -202,6 +209,8 @@ class _MainTabControllerState extends State<MainTabController>
   }
 
   bool get isToday => viewDateStr == todayStr;
+
+  String _formatWeight(double value) => formatWeightValue(value);
 
   @override
   void initState() {
@@ -424,7 +433,8 @@ class _MainTabControllerState extends State<MainTabController>
     consumed: List.unmodifiable(allConsumedItems),
     exercises: List.unmodifiable(allExerciseItems),
     training: List.unmodifiable(allTrainingSessions),
-    water: Map.unmodifiable(dailyWater),
+    waterRecords: List.unmodifiable(waterIntakeRecords),
+    water: Map.unmodifiable(waterTotals(waterIntakeRecords)),
     weight: Map.unmodifiable(dailyWeight),
     pendingCloudDeletes: _pendingCloudDeletes,
   );
@@ -449,7 +459,7 @@ class _MainTabControllerState extends State<MainTabController>
       allConsumedItems = [...snapshot.consumed];
       allExerciseItems = [...snapshot.exercises];
       allTrainingSessions = [...snapshot.training];
-      dailyWater = {...snapshot.water};
+      waterIntakeRecords = [...snapshot.waterRecords];
       dailyWeight = {...snapshot.weight};
       _pendingCloudDeletes = snapshot.pendingCloudDeletes;
     });
@@ -471,6 +481,55 @@ class _MainTabControllerState extends State<MainTabController>
     _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
       exerciseRecordIds: {..._pendingCloudDeletes.exerciseRecordIds, id},
     );
+  }
+
+  void _queueWaterDelete(String id) {
+    _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
+      waterRecordIds: {..._pendingCloudDeletes.waterRecordIds, id},
+    );
+  }
+
+  List<WaterIntakeRecord> _waterRecordsForDate(String date) {
+    final records =
+        waterIntakeRecords.where((record) => record.date == date).toList()
+          ..sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+    return records;
+  }
+
+  int _waterTotalForDate(String date) {
+    return _waterRecordsForDate(
+      date,
+    ).fold(0, (total, record) => total + record.amountMl);
+  }
+
+  @override
+  List<WaterIntakeRecord> waterRecordsForDate(String date) =>
+      _waterRecordsForDate(date);
+
+  @override
+  Future<void> addWaterRecord(WaterIntakeRecord record) async {
+    if (!mounted || record.amountMl <= 0) return;
+    setState(() => waterIntakeRecords.add(record));
+    await _saveData();
+  }
+
+  @override
+  Future<void> updateWaterRecord(WaterIntakeRecord record) async {
+    if (!mounted) return;
+    final index = waterIntakeRecords.indexWhere((item) => item.id == record.id);
+    if (index == -1) return;
+    setState(() => waterIntakeRecords[index] = record);
+    await _saveData();
+  }
+
+  @override
+  Future<void> deleteWaterRecord(String recordId) async {
+    if (!mounted) return;
+    final index = waterIntakeRecords.indexWhere((item) => item.id == recordId);
+    if (index == -1) return;
+    setState(() => waterIntakeRecords.removeAt(index));
+    _queueWaterDelete(recordId);
+    await _saveData();
   }
 
   @override
@@ -2352,7 +2411,7 @@ class _MainTabControllerState extends State<MainTabController>
                 MaterialPageRoute(
                   builder: (context) => ChatAssistantPage(
                     userData:
-                        "性别:$gender, 生日:$birthYear-$birthMonth-$birthDay, 身高:${height.toInt()}cm, 体重:$currentWeight kg",
+                        "性别:$gender, 生日:$birthYear-$birthMonth-$birthDay, 身高:${height.toInt()}cm, 体重:${_formatWeight(currentWeight)}",
                   ),
                 ),
               );
@@ -2364,7 +2423,7 @@ class _MainTabControllerState extends State<MainTabController>
               color: GoatApp.marsGreen,
               size: 24,
             ),
-            onPressed: _showNutritionQuickAdd,
+            onPressed: () => _showFoodPicker(context, '加餐'),
           ),
           const SizedBox(width: 8),
         ],
@@ -2393,7 +2452,7 @@ class _MainTabControllerState extends State<MainTabController>
             const SizedBox(height: 16),
           ],
           _buildWaterWeightRow(
-            dailyWater[viewDateStr] ?? 0,
+            _waterTotalForDate(viewDateStr),
             dailyWeight[viewDateStr] ?? 0.0,
           ),
           const SizedBox(height: 16),
@@ -2556,21 +2615,21 @@ class _MainTabControllerState extends State<MainTabController>
                                     consumed
                                         .where((e) => e.mealType == '早餐')
                                         .toList(),
-                                    () => _showNutritionQuickAdd('早餐'),
+                                    () => _showFoodPicker(context, '早餐'),
                                   ),
                                   _buildSubGroup(
                                     '午餐',
                                     consumed
                                         .where((e) => e.mealType == '午餐')
                                         .toList(),
-                                    () => _showNutritionQuickAdd('午餐'),
+                                    () => _showFoodPicker(context, '午餐'),
                                   ),
                                   _buildSubGroup(
                                     '晚餐',
                                     consumed
                                         .where((e) => e.mealType == '晚餐')
                                         .toList(),
-                                    () => _showNutritionQuickAdd('晚餐'),
+                                    () => _showFoodPicker(context, '晚餐'),
                                   ),
                                 ],
                               ),
@@ -2584,14 +2643,14 @@ class _MainTabControllerState extends State<MainTabController>
                                     consumed
                                         .where((e) => e.mealType == '补剂')
                                         .toList(),
-                                    () => _showNutritionQuickAdd('加餐'),
+                                    () => _showFoodPicker(context, '加餐'),
                                   ),
                                   _buildSubGroup(
                                     '日常补充',
                                     consumed
                                         .where((e) => e.mealType == '日常补充')
                                         .toList(),
-                                    () => _showNutritionQuickAdd('加餐'),
+                                    () => _showFoodPicker(context, '加餐'),
                                   ),
                                 ],
                               ),
@@ -2664,6 +2723,7 @@ class _MainTabControllerState extends State<MainTabController>
     Set<String> activeDates = {};
     activeDates.addAll(allConsumedItems.map((e) => e.date));
     activeDates.addAll(allExerciseItems.map((e) => e.date));
+    activeDates.addAll(waterIntakeRecords.map((e) => e.date));
 
     Set<String> trainingDates = {};
     trainingDates.addAll(allTrainingSessions.map((e) => e.date));
@@ -2845,6 +2905,7 @@ class _MainTabControllerState extends State<MainTabController>
     final activeDays = dateKeys.where((date) {
       return allConsumedItems.any((item) => item.date == date) ||
           allExerciseItems.any((item) => item.date == date) ||
+          waterIntakeRecords.any((item) => item.date == date) ||
           allTrainingSessions.any((session) => session.date == date);
     }).length;
     final trainingVolume = allTrainingSessions
@@ -3395,7 +3456,7 @@ class _MainTabControllerState extends State<MainTabController>
                 ),
                 title: const Text("基础个人信息", style: TextStyle(fontSize: 15)),
                 subtitle: Text(
-                  "$gender | $birthYear年 | ${height.toInt()}cm | $currentWeight kg",
+                  "$gender | $birthYear年 | ${height.toInt()}cm | ${_formatWeight(currentWeight)}",
                   style: const TextStyle(fontSize: 12, color: Colors.black38),
                 ),
                 trailing: const Icon(
@@ -3550,15 +3611,26 @@ class _MainTabControllerState extends State<MainTabController>
                   );
                 }),
                 const Divider(height: 24),
-                _buildEditRow("体重", "$currentWeight kg", () {
-                  _showWeightPicker((val) {
-                    setState(() {
-                      currentWeight = val;
-                      dailyWeight[todayStr] = currentWeight;
-                    });
-                    _saveData();
-                    setModalState(() {});
-                  });
+                _buildEditRow("体重", _formatWeight(currentWeight), () {
+                  showWeightPickerSheet(
+                    context: context,
+                    initialWeight: currentWeight,
+                    onSaved: (val) {
+                      final change = applyWeightChange(
+                        dailyWeight: dailyWeight,
+                        date: todayStr,
+                        today: todayStr,
+                        currentWeight: currentWeight,
+                        value: val,
+                      );
+                      setState(() {
+                        currentWeight = change.currentWeight;
+                        dailyWeight = change.dailyWeight;
+                      });
+                      _saveData();
+                      setModalState(() {});
+                    },
+                  );
                 }),
               ],
             ),
@@ -3725,82 +3797,6 @@ class _MainTabControllerState extends State<MainTabController>
                       children: List.generate(
                         31,
                         (i) => Center(child: Text("${1 + i}日")),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showWeightPicker(Function(double) onSave) {
-    int intPart = currentWeight.floor(),
-        decPart = ((currentWeight - intPart) * 10).round();
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      builder: (context) => SizedBox(
-        height: 280,
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text(
-                    "取消",
-                    style: TextStyle(color: Colors.black38),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    onSave(intPart + decPart / 10.0);
-                    Navigator.pop(context);
-                  },
-                  child: const Text(
-                    "确定",
-                    style: TextStyle(
-                      color: GoatApp.marsGreen,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: CupertinoPicker(
-                      scrollController: FixedExtentScrollController(
-                        initialItem: intPart - 20,
-                      ),
-                      itemExtent: 40,
-                      onSelectedItemChanged: (i) => intPart = 20 + i,
-                      children: List.generate(
-                        200,
-                        (i) => Center(child: Text("${20 + i}")),
-                      ),
-                    ),
-                  ),
-                  const Center(
-                    child: Text(".", style: TextStyle(fontSize: 24)),
-                  ),
-                  Expanded(
-                    child: CupertinoPicker(
-                      scrollController: FixedExtentScrollController(
-                        initialItem: decPart,
-                      ),
-                      itemExtent: 40,
-                      onSelectedItemChanged: (i) => decPart = i,
-                      children: List.generate(
-                        10,
-                        (i) => Center(child: Text("$i kg")),
                       ),
                     ),
                   ),
@@ -4001,24 +3997,53 @@ class _MainTabControllerState extends State<MainTabController>
             '${water == 0 ? '--' : water}',
             Icons.water_drop_outlined,
             Colors.blueAccent,
-            () => _showRecordDialog(
-              "饮水",
-              (dailyWater[viewDateStr] ?? 0).toDouble(),
-              false,
-            ),
+            () => _showWaterTrackingPage(),
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: _buildDataCard(
             '体重 (kg)',
-            '${weight == 0 ? '--' : weight}',
+            weight == 0 ? '--' : _formatWeight(weight),
             Icons.monitor_weight_outlined,
             Colors.orangeAccent,
-            () => _showRecordDialog("体重", dailyWeight[viewDateStr] ?? 0, true),
+            () => _showWeightPickerForDate(),
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _showWaterTrackingPage() async {
+    await showWaterTrackingPage(
+      context: context,
+      date: viewDateStr,
+      repository: this,
+      onTotalChanged: (_) {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  void _showWeightPickerForDate() {
+    final initial = dailyWeight[viewDateStr] ?? currentWeight;
+    showWeightPickerSheet(
+      context: context,
+      initialWeight: initial,
+      onSaved: (value) {
+        final change = applyWeightChange(
+          dailyWeight: dailyWeight,
+          date: viewDateStr,
+          today: todayStr,
+          currentWeight: currentWeight,
+          value: value,
+        );
+        setState(() {
+          dailyWeight = change.dailyWeight;
+          currentWeight = change.currentWeight;
+        });
+        _saveData();
+      },
     );
   }
 
@@ -4155,7 +4180,7 @@ class _MainTabControllerState extends State<MainTabController>
             ),
             IconButton(
               tooltip: '快速记录',
-              onPressed: () => _showNutritionQuickAdd(title),
+              onPressed: () => _showFoodPicker(context, title),
               icon: const Icon(
                 Icons.add_circle_outline,
                 color: GoatApp.marsGreen,
@@ -4546,9 +4571,61 @@ class _MainTabControllerState extends State<MainTabController>
   // ============================================================================
   // 6. DeepSeek 食物搜索与分类列表
   // ============================================================================
+  List<FoodItem> _historyFoodItems() {
+    final result = <FoodItem>[];
+    final seen = <String>{};
+    for (final record in allConsumedItems) {
+      final key = record.name.trim();
+      if (key.isEmpty || !seen.add(key)) continue;
+      result.add(
+        FoodItem(
+          id: 'history_$key',
+          name: key,
+          protein: record.amount > 0
+              ? record.p * 100 / record.amount
+              : record.p,
+          carbs: record.amount > 0 ? record.c * 100 / record.amount : record.c,
+          fat: record.amount > 0 ? record.f * 100 / record.amount : record.f,
+          calories: record.amount > 0
+              ? record.kcal * 100 / record.amount
+              : record.kcal,
+          category: '其他',
+          unit: record.unit,
+          weightPerUnit: record.unit.isEmpty ? 0 : record.amount,
+        ),
+      );
+    }
+    return result;
+  }
+
+  String _displayFoodCategory(String category) {
+    if (category == '蔬果') return '蔬菜';
+    if (category == '饮品') return '饮料';
+    if (category == '肉类' || category == '蛋奶') return '肉蛋奶';
+    if (category == '补剂') return '其他';
+    return category;
+  }
+
+  List<FoodItem> _pickerFoods() {
+    final result = <FoodItem>[];
+    final seen = <String>{};
+    void addAll(Iterable<FoodItem> foods) {
+      for (final food in foods) {
+        final key = food.name.trim();
+        if (key.isNotEmpty && seen.add(key)) result.add(food);
+      }
+    }
+
+    addAll(foodDatabase);
+    addAll(_historyFoodItems());
+    addAll(buildBuiltinFoodDatabase());
+    return result;
+  }
+
   void _showFoodPicker(BuildContext context, String mealType) {
     final searchCtrl = TextEditingController();
-    final categories = ['全部', '主食', '肉蛋奶', '蔬果', '饮品', '补剂'];
+    List<FoodItem>? searchResults;
+    final categories = ['全部', '主食', '肉蛋奶', '蔬菜', '水果', '饮料', '其他'];
 
     showModalBottomSheet(
       context: context,
@@ -4560,8 +4637,17 @@ class _MainTabControllerState extends State<MainTabController>
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
           void performSearch(String kw) async {
-            if (kw.isEmpty) return;
+            final query = kw.trim();
+            if (query.isEmpty) return;
+            final localMatches = _pickerFoods()
+                .where((food) => food.name.contains(query))
+                .toList();
+            if (localMatches.isNotEmpty) {
+              setModalState(() => searchResults = localMatches);
+              return;
+            }
             await _searchFoodWithDeepSeek(kw, setModalState);
+            setModalState(() => searchResults = null);
             searchCtrl.clear();
           }
 
@@ -4576,21 +4662,59 @@ class _MainTabControllerState extends State<MainTabController>
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '录入 $mealType',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
+                        Expanded(
+                          child: Text(
+                            '录入 $mealType',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
                           ),
                         ),
-                        TextButton.icon(
-                          onPressed: () =>
-                              _showAddCustomFoodDialog(setModalState),
-                          icon: const Icon(Icons.edit_note, size: 18),
-                          label: const Text('自定义'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: GoatApp.marsGreen,
-                          ),
+                        Wrap(
+                          spacing: 0,
+                          children: [
+                            IconButton(
+                              tooltip: 'AI 饮食录入',
+                              onPressed: () {
+                                Navigator.pop(context);
+                                unawaited(
+                                  showVoiceEntrySheet(
+                                    context: this.context,
+                                    mealType: mealType,
+                                    speechService: _speechService,
+                                    nutritionService: _nutritionAiService,
+                                    repository: this,
+                                  ),
+                                );
+                              },
+                              icon: const Icon(
+                                Icons.auto_awesome,
+                                color: GoatApp.marsGreen,
+                                size: 20,
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _showCopyYesterdaySheet(mealType);
+                              },
+                              icon: const Icon(Icons.copy_outlined, size: 17),
+                              label: const Text('复制昨日'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: GoatApp.marsGreen,
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () =>
+                                  _showAddCustomFoodDialog(setModalState),
+                              icon: const Icon(Icons.edit_note, size: 17),
+                              label: const Text('自定义'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: GoatApp.marsGreen,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -4731,11 +4855,16 @@ class _MainTabControllerState extends State<MainTabController>
                           )
                         : TabBarView(
                             children: categories.map((cat) {
-                              final filteredList = cat == '全部'
-                                  ? foodDatabase
-                                  : foodDatabase
-                                        .where((f) => f.category == cat)
-                                        .toList();
+                              final filteredList =
+                                  (searchResults ?? _pickerFoods())
+                                      .where(
+                                        (f) =>
+                                            searchResults != null ||
+                                            cat == '全部' ||
+                                            _displayFoodCategory(f.category) ==
+                                                cat,
+                                      )
+                                      .toList();
 
                               if (filteredList.isEmpty) {
                                 return Center(
@@ -4762,25 +4891,32 @@ class _MainTabControllerState extends State<MainTabController>
                                     padding: const EdgeInsets.only(bottom: 8.0),
                                     child: Slidable(
                                       key: ValueKey(f.name + index.toString()),
-                                      endActionPane: ActionPane(
-                                        motion: const ScrollMotion(),
-                                        extentRatio: 0.25,
-                                        children: [
-                                          CustomSlidableAction(
-                                            onPressed: (ctx) {
-                                              setState(() {
-                                                foodDatabase.remove(f);
-                                              });
-                                              _queueFoodDelete(f.id);
-                                              _saveData();
-                                              setModalState(() {});
-                                            },
-                                            backgroundColor: Colors.redAccent,
-                                            foregroundColor: Colors.white,
-                                            child: const Icon(Icons.delete),
-                                          ),
-                                        ],
-                                      ),
+                                      endActionPane:
+                                          f.id.startsWith('builtin_') ||
+                                              f.id.startsWith('history_')
+                                          ? null
+                                          : ActionPane(
+                                              motion: const ScrollMotion(),
+                                              extentRatio: 0.25,
+                                              children: [
+                                                CustomSlidableAction(
+                                                  onPressed: (ctx) {
+                                                    setState(() {
+                                                      foodDatabase.remove(f);
+                                                    });
+                                                    _queueFoodDelete(f.id);
+                                                    _saveData();
+                                                    setModalState(() {});
+                                                  },
+                                                  backgroundColor:
+                                                      Colors.redAccent,
+                                                  foregroundColor: Colors.white,
+                                                  child: const Icon(
+                                                    Icons.delete,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                       child: Container(
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF4F5F7),
@@ -5119,7 +5255,8 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
-  void _showRecordDialog(String title, double current, bool isWeight) {
+  void _showLegacyRecordDialog(String title, double current, bool isWeight) {
+    /* Legacy aggregate picker removed; weight and water use shared pages.
     int step = isWeight ? 1 : 50;
     double tempValue = current == 0 ? (isWeight ? 60.0 : 200.0) : current;
     int initialIndex = isWeight ? tempValue.toInt() : (tempValue ~/ step);
@@ -5160,8 +5297,6 @@ class _MainTabControllerState extends State<MainTabController>
                           dailyWeight[viewDateStr] = tempValue;
                           if (viewDateStr == todayStr)
                             currentWeight = tempValue;
-                        } else {
-                          dailyWater[viewDateStr] = tempValue.toInt();
                         }
                       });
                       _saveData();
@@ -5199,6 +5334,7 @@ class _MainTabControllerState extends State<MainTabController>
         ),
       ),
     );
+    */
   }
 
   Future<void> _showNutritionQuickAdd([String mealType = '加餐']) async {
@@ -5296,6 +5432,211 @@ class _MainTabControllerState extends State<MainTabController>
 
   void _showExerciseAddDialog() {
     String type = '有氧运动';
+    final now = TimeOfDay.now();
+    final startController = TextEditingController(
+      text:
+          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+    );
+    final hoursController = TextEditingController(text: '0');
+    final minutesController = TextEditingController(text: '45');
+    final kcalController = TextEditingController();
+    String? error;
+
+    final route = showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setModalState) {
+          final hours = int.tryParse(hoursController.text) ?? 0;
+          final minutes = int.tryParse(minutesController.text) ?? 0;
+          ExerciseEndTime? endTime;
+          try {
+            endTime = calculateExerciseEndTime(
+              startTime: startController.text,
+              hours: hours,
+              minutes: minutes,
+            );
+          } on FormatException {
+            endTime = null;
+          }
+          final endLabel = endTime == null
+              ? '--'
+              : '${endTime.isNextDay ? '次日 ' : ''}${endTime.value}';
+
+          void refresh() => setModalState(() => error = null);
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              24,
+              24,
+              24,
+              24 + MediaQuery.of(sheetContext).viewInsets.bottom,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '记录运动',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    children: ['有氧运动', '无氧运动']
+                        .map(
+                          (value) => ChoiceChip(
+                            label: Text(value),
+                            selected: type == value,
+                            onSelected: (_) =>
+                                setModalState(() => type = value),
+                            selectedColor: GoatApp.marsGreen.withOpacity(0.12),
+                            labelStyle: TextStyle(
+                              color: type == value
+                                  ? GoatApp.marsGreen
+                                  : Colors.black54,
+                            ),
+                            showCheckmark: false,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: startController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [TimeTextInputFormatter()],
+                    onChanged: (_) => refresh(),
+                    decoration: const InputDecoration(
+                      labelText: '开始时间',
+                      hintText: '11:41',
+                      filled: true,
+                      fillColor: Color(0xFFF4F5F7),
+                      border: OutlineInputBorder(borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: hoursController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          onChanged: (_) => refresh(),
+                          decoration: const InputDecoration(
+                            labelText: '运动时长（小时）',
+                            filled: true,
+                            fillColor: Color(0xFFF4F5F7),
+                            border: OutlineInputBorder(
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: minutesController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          onChanged: (_) => refresh(),
+                          decoration: const InputDecoration(
+                            labelText: '运动时长（分钟）',
+                            filled: true,
+                            fillColor: Color(0xFFF4F5F7),
+                            border: OutlineInputBorder(
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '预计结束  $endLabel',
+                    style: const TextStyle(
+                      color: GoatApp.marsGreen,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: kcalController,
+                    keyboardType: TextInputType.number,
+                    onChanged: (_) => refresh(),
+                    decoration: const InputDecoration(
+                      labelText: '消耗热量 (kcal)',
+                      filled: true,
+                      fillColor: Color(0xFFF4F5F7),
+                      border: OutlineInputBorder(borderSide: BorderSide.none),
+                    ),
+                  ),
+                  if (error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      error!,
+                      style: const TextStyle(color: Colors.redAccent),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: () {
+                      final kcal = double.tryParse(kcalController.text.trim());
+                      if (endTime == null || kcal == null || kcal < 0) {
+                        setModalState(() => error = '请检查时间、时长和消耗热量');
+                        return;
+                      }
+                      setState(
+                        () => allExerciseItems.insert(
+                          0,
+                          ExerciseRecord(
+                            id: DateTime.now().microsecondsSinceEpoch
+                                .toString(),
+                            type: type,
+                            kcal: kcal,
+                            startTime: startController.text,
+                            endTime: endLabel,
+                            date: viewDateStr,
+                          ),
+                        ),
+                      );
+                      _saveData();
+                      Navigator.pop(sheetContext);
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: GoatApp.marsGreen,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('保存记录'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    route.whenComplete(() {
+      startController.dispose();
+      hoursController.dispose();
+      minutesController.dispose();
+      kcalController.dispose();
+    });
+  }
+
+  void _showLegacyExerciseAddDialog() {
+    String type = '有氧运动';
     TimeOfDay startTime = TimeOfDay.now();
     TimeOfDay endTime = TimeOfDay.now();
     final kcalCtrl = TextEditingController();
@@ -5353,13 +5694,7 @@ class _MainTabControllerState extends State<MainTabController>
                 children: [
                   Expanded(
                     child: InkWell(
-                      onTap: () async {
-                        final t = await showTimePicker(
-                          context: context,
-                          initialTime: startTime,
-                        );
-                        if (t != null) setModalState(() => startTime = t);
-                      },
+                      onTap: () {},
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         decoration: BoxDecoration(
@@ -5378,13 +5713,7 @@ class _MainTabControllerState extends State<MainTabController>
                   const SizedBox(width: 12),
                   Expanded(
                     child: InkWell(
-                      onTap: () async {
-                        final t = await showTimePicker(
-                          context: context,
-                          initialTime: endTime,
-                        );
-                        if (t != null) setModalState(() => endTime = t);
-                      },
+                      onTap: () {},
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         decoration: BoxDecoration(
@@ -5499,7 +5828,7 @@ class _MainTabControllerState extends State<MainTabController>
                   icon: const Icon(Icons.add_circle, color: GoatApp.marsGreen),
                   onPressed: () {
                     Navigator.pop(context);
-                    _showNutritionQuickAdd(mealType);
+                    _showFoodPicker(this.context, mealType);
                   },
                 ),
               ],
@@ -5532,7 +5861,7 @@ class _MainTabControllerState extends State<MainTabController>
                   GestureDetector(
                     onTap: () {
                       Navigator.pop(context);
-                      _showNutritionQuickAdd(mealType);
+                      _showFoodPicker(this.context, mealType);
                     },
                     child: Container(
                       width: double.infinity,

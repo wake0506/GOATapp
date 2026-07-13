@@ -18,12 +18,15 @@ import 'models/training.dart';
 import 'models/app_snapshot.dart';
 import 'models/parsed_diet_item.dart';
 import 'models/pending_cloud_deletes.dart';
-import 'features/voice_entry/voice_entry_sheet.dart';
+import 'features/nutrition/nutrition_quick_add_sheet.dart';
+import 'features/nutrition/copy_diet_sheet.dart';
+import 'features/nutrition/edit_diet_record_sheet.dart';
 import 'repositories/nutrition_repository.dart';
 import 'services/cloud_sync_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/nutrition_ai_service.dart';
 import 'services/speech_recognition_service.dart';
+import 'services/nutrition_quick_access_service.dart';
 
 export 'models/consumed_record.dart';
 export 'models/daily_macro_stats.dart';
@@ -31,6 +34,11 @@ export 'models/exercise_record.dart';
 export 'models/food_item.dart';
 export 'models/statistics_period.dart';
 export 'models/training.dart';
+
+const bool enableSystemSpeechRecognition = bool.fromEnvironment(
+  'ENABLE_SYSTEM_SPEECH',
+  defaultValue: false,
+);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -103,6 +111,8 @@ class _MainTabControllerState extends State<MainTabController>
       DeviceSpeechRecognitionService();
   late final DeepSeekNutritionAiService _nutritionAiService =
       DeepSeekNutritionAiService(apiKey: deepSeekApiKey);
+  final NutritionQuickAccessService _nutritionQuickAccessService =
+      const NutritionQuickAccessService();
   LocalStorageService? _storage;
   String _activeNamespace = 'guest';
   String? _activeUserId;
@@ -478,6 +488,74 @@ class _MainTabControllerState extends State<MainTabController>
         )
         .toList();
     setState(() => allConsumedItems.insertAll(0, records));
+    await _saveData();
+  }
+
+  @override
+  List<ConsumedRecord> recordsForDate(String date) =>
+      allConsumedItems.where((record) => record.date == date).toList();
+
+  @override
+  Future<void> addConsumedRecords(List<ConsumedRecord> records) async {
+    if (records.isEmpty || !mounted) return;
+    final copies = records
+        .map(
+          (record) => ConsumedRecord(
+            id: '${DateTime.now().microsecondsSinceEpoch}_${math.Random().nextInt(1000)}',
+            name: record.name,
+            p: record.p,
+            c: record.c,
+            f: record.f,
+            kcal: record.kcal,
+            mealType: record.mealType,
+            date: record.date,
+            amount: record.amount,
+            unit: record.unit,
+          ),
+        )
+        .toList();
+    setState(() => allConsumedItems.insertAll(0, copies));
+    await _saveData();
+  }
+
+  @override
+  Future<void> updateRecord(ConsumedRecord record) async {
+    final index = allConsumedItems.indexWhere((item) => item.id == record.id);
+    if (index == -1 || !mounted) return;
+    setState(() => allConsumedItems[index] = record);
+    await _saveData();
+  }
+
+  @override
+  Future<void> deleteRecord(String recordId) async {
+    final index = allConsumedItems.indexWhere((item) => item.id == recordId);
+    if (index == -1) return;
+    final record = allConsumedItems[index];
+    setState(() => allConsumedItems.removeAt(index));
+    _queueDietDelete(record.id);
+    await _saveData();
+  }
+
+  @override
+  Future<void> restoreRecord(ConsumedRecord record) async {
+    _pendingCloudDeletes = _pendingCloudDeletes.copyWith(
+      dietRecordIds: {..._pendingCloudDeletes.dietRecordIds}..remove(record.id),
+    );
+    if (!mounted) return;
+    setState(() => allConsumedItems.insert(0, record));
+    await _saveData();
+  }
+
+  @override
+  Future<void> replaceRecordsForOperation(List<ConsumedRecord> records) async {
+    if (!mounted) return;
+    final ids = records.map((record) => record.id).toSet();
+    setState(() {
+      allConsumedItems.removeWhere(
+        (record) => record.date == viewDateStr && ids.contains(record.id),
+      );
+      allConsumedItems.insertAll(0, records);
+    });
     await _saveData();
   }
 
@@ -2254,11 +2332,11 @@ class _MainTabControllerState extends State<MainTabController>
           ),
           IconButton(
             icon: const Icon(
-              Icons.mic_none_rounded,
+              Icons.edit_note_rounded,
               color: GoatApp.marsGreen,
               size: 24,
             ),
-            onPressed: _showVoiceInputDialog,
+            onPressed: _showNutritionQuickAdd,
           ),
           const SizedBox(width: 8),
         ],
@@ -4047,10 +4125,14 @@ class _MainTabControllerState extends State<MainTabController>
                 ),
               ],
             ),
-            const Icon(
-              Icons.add_circle_outline,
-              color: GoatApp.marsGreen,
-              size: 22,
+            IconButton(
+              tooltip: '快速记录',
+              onPressed: () => _showNutritionQuickAdd(title),
+              icon: const Icon(
+                Icons.add_circle_outline,
+                color: GoatApp.marsGreen,
+                size: 22,
+              ),
             ),
           ],
         ),
@@ -5091,13 +5173,76 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
-  Future<void> _showVoiceInputDialog([String mealType = '加餐']) async {
-    await showVoiceEntrySheet(
+  Future<void> _showNutritionQuickAdd([String mealType = '加餐']) async {
+    final recentFoods = _nutritionQuickAccessService.recentFoods(
+      records: allConsumedItems,
+      mealType: mealType,
+    );
+    await showNutritionQuickAddSheet(
       context: context,
       mealType: mealType,
-      speechService: _speechService,
-      nutritionService: _nutritionAiService,
+      recentFoods: recentFoods,
       repository: this,
+      nutritionService: _nutritionAiService,
+      speechService: _speechService,
+      enableSystemSpeech: enableSystemSpeechRecognition,
+      onAddRecent: (suggestion, amount) async {
+        final ratio = amount / suggestion.amount;
+        await addConsumedRecords([
+          ConsumedRecord(
+            id: '',
+            name: suggestion.displayName,
+            p: suggestion.protein * ratio,
+            c: suggestion.carbs * ratio,
+            f: suggestion.fat * ratio,
+            kcal: suggestion.kcal * ratio,
+            mealType: mealType,
+            date: viewDateStr,
+            amount: amount,
+            unit: suggestion.unit,
+          ),
+        ]);
+      },
+      onCopyYesterday: () {
+        Navigator.pop(context);
+        _showCopyYesterdaySheet(mealType);
+      },
+    );
+  }
+
+  Future<void> _showCopyYesterdaySheet(String? mealType) async {
+    final date = DateUtils.dateOnly(
+      DateTime.tryParse(viewDateStr) ?? DateTime.now(),
+    ).subtract(const Duration(days: 1));
+    final sourceDate = _dateKey(date);
+    final plan = _nutritionQuickAccessService.copyPlan(
+      records: allConsumedItems,
+      sourceDate: sourceDate,
+      mealType: mealType,
+    );
+    await showCopyDietSheet(
+      context: context,
+      plan: plan,
+      targetDate: viewDateStr,
+      onConfirm: (records) async {
+        final copies = records
+            .map(
+              (record) => ConsumedRecord(
+                id: '',
+                name: record.name,
+                p: record.p,
+                c: record.c,
+                f: record.f,
+                kcal: record.kcal,
+                mealType: record.mealType,
+                date: viewDateStr,
+                amount: record.amount,
+                unit: record.unit,
+              ),
+            )
+            .toList();
+        await addConsumedRecords(copies);
+      },
     );
   }
 
@@ -5339,7 +5484,7 @@ class _MainTabControllerState extends State<MainTabController>
                   GestureDetector(
                     onTap: () {
                       Navigator.pop(context);
-                      _showVoiceInputDialog(mealType);
+                      _showNutritionQuickAdd(mealType);
                     },
                     child: Container(
                       width: double.infinity,
@@ -5367,7 +5512,7 @@ class _MainTabControllerState extends State<MainTabController>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  "AI 语音快速记录",
+                                  "AI 饮食快速记录",
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold,
@@ -5384,7 +5529,11 @@ class _MainTabControllerState extends State<MainTabController>
                               ],
                             ),
                           ),
-                          Icon(Icons.mic, color: Colors.white, size: 28),
+                          Icon(
+                            Icons.edit_note_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
                         ],
                       ),
                     ),
@@ -5424,6 +5573,14 @@ class _MainTabControllerState extends State<MainTabController>
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: ListTile(
+                              onTap: () {
+                                Navigator.pop(context);
+                                showEditDietRecordSheet(
+                                  context: this.context,
+                                  record: item,
+                                  onSave: updateRecord,
+                                );
+                              },
                               title: Text(
                                 item.name,
                                 style: const TextStyle(

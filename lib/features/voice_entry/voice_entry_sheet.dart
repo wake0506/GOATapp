@@ -224,7 +224,7 @@ class _VoiceEntrySheetState extends State<VoiceEntrySheet> {
                   children: [
                     const Expanded(
                       child: Text(
-                        '语音饮食录入',
+                        'AI 饮食录入',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,

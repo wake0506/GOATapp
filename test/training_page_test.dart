@@ -1,86 +1,114 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:goat_app/features/training/models/training_page_view_model.dart';
 import 'package:goat_app/features/training/training_page.dart';
 import 'package:goat_app/models/training.dart';
 
 void main() {
   Widget buildPage({
     List<TrainingSession> sessions = const [],
-    ValueChanged<String>? onTemplate,
-  }) => MaterialApp(
-    home: TrainingPage(
-      sessions: sessions,
-      businessDate: '2026-07-14',
-      onStartTraining: () {},
-      onAddRecord: () {},
-      onAddTemplate: () {},
-      onViewHistory: () {},
-      onSelectTemplate: (template) => onTemplate?.call(template.title),
-      onOpenSession: (_) {},
-    ),
-  );
+    VoidCallback? onStartTraining,
+    VoidCallback? onPpl,
+    VoidCallback? onFullBody,
+    VoidCallback? onHistory,
+    VoidCallback? onTemplates,
+  }) {
+    return MaterialApp(
+      home: TrainingPage(
+        sessions: sessions,
+        businessDate: '2026-07-14',
+        onStartTraining: onStartTraining ?? () {},
+        onUsePplTemplate: onPpl ?? () {},
+        onUseFullBodyTemplate: onFullBody ?? () {},
+        onViewHistory: onHistory ?? () {},
+        onManageTemplates: onTemplates ?? () {},
+      ),
+    );
+  }
 
-  testWidgets('empty training state remains a complete usable page', (
+  testWidgets('empty training page remains complete instead of blank', (
     tester,
   ) async {
     await tester.pumpWidget(buildPage());
 
-    expect(find.byKey(const Key('training-dashboard-card')), findsOneWidget);
-    expect(find.text('快捷操作'), findsOneWidget);
-    expect(find.text('分类模板'), findsOneWidget);
-    expect(find.text('胸'), findsOneWidget);
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -850));
+    expect(find.text('训 练 记 录'), findsOneWidget);
+    expect(find.byKey(const Key('training-status-card')), findsOneWidget);
+    expect(find.byKey(const Key('training-quick-start-card')), findsOneWidget);
+    expect(find.byKey(const Key('training-load-card')), findsOneWidget);
+    expect(find.text('开始一次新训练'), findsOneWidget);
+    expect(find.text('我的常用方案'), findsOneWidget);
+    expect(find.text('PPL-推力日'), findsOneWidget);
+    expect(find.text('最近 7 天暂无足够训练数据'), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -520));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(const Key('training-empty-state'), skipOffstage: false),
+      find.byKey(const Key('personal-best-card'), skipOffstage: false),
       findsOneWidget,
     );
     expect(
-      find.byKey(const Key('training-plan-section'), skipOffstage: false),
+      find.byKey(const Key('training-ai-insight-card'), skipOffstage: false),
       findsOneWidget,
     );
-    expect(find.text('开始你的第一节训练', skipOffstage: false), findsOneWidget);
+    expect(find.text('暂无记录'), findsNWidgets(3));
   });
 
-  testWidgets('recent sessions and legacy training summary are visible', (
+  testWidgets('quick start and nested entries use the existing flows', (
+    tester,
+  ) async {
+    var startCount = 0;
+    var pplCount = 0;
+    var fullBodyCount = 0;
+    var historyCount = 0;
+    var templateCount = 0;
+    await tester.pumpWidget(
+      buildPage(
+        onStartTraining: () => startCount++,
+        onPpl: () => pplCount++,
+        onFullBody: () => fullBodyCount++,
+        onHistory: () => historyCount++,
+        onTemplates: () => templateCount++,
+      ),
+    );
+
+    await tester.tap(find.text('开始一次新训练'));
+    await tester.tap(find.text('PPL-推力日'));
+    await tester.tap(find.text('全身循环燃脂'));
+    await tester.tap(find.text('查看训练历史'));
+    await tester.tap(find.text('管理训练模板'));
+
+    expect(startCount, 1);
+    expect(pplCount, 1);
+    expect(fullBodyCount, 1);
+    expect(historyCount, 1);
+    expect(templateCount, 1);
+  });
+
+  testWidgets('real sessions feed status, load and personal bests', (
     tester,
   ) async {
     final session = TrainingSession(
       id: 'session-1',
-      name: '推日训练',
+      name: '推力日',
       date: '2026-07-14',
       exercises: [
         TrainingExercise(
           exerciseName: '杠铃卧推',
           bodyPart: '胸部',
-          sets: [SetRecord(weight: 60, reps: 8)],
+          sets: [SetRecord(weight: 80, reps: 6, durationSec: 120)],
         ),
       ],
     );
     await tester.pumpWidget(buildPage(sessions: [session]));
 
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -850));
-    await tester.pumpAndSettle();
-
-    expect(find.text('推日训练', skipOffstage: false), findsWidgets);
-    expect(
-      find.textContaining('已保留 1 条训练结构', skipOffstage: false),
-      findsOneWidget,
+    final viewModel = TrainingPageViewModel.fromSessions(
+      sessions: [session],
+      businessDate: '2026-07-14',
     );
-    expect(
-      find.byKey(const Key('training-empty-state'), skipOffstage: false),
-      findsNothing,
-    );
-  });
-
-  testWidgets('template selection starts the training flow with a body part', (
-    tester,
-  ) async {
-    String? selected;
-    await tester.pumpWidget(buildPage(onTemplate: (value) => selected = value));
-
-    await tester.tap(find.text('胸').first);
-    expect(selected, '胸');
+    expect(viewModel.status.volume, 480);
+    expect(viewModel.status.completedSets, 1);
+    expect(viewModel.status.durationMinutes, 2);
+    expect(viewModel.muscleLoads.first.value, 100);
+    expect(viewModel.personalBests.first.weight, 80);
   });
 
   testWidgets('small screen and enlarged text do not overflow', (tester) async {
@@ -93,7 +121,11 @@ void main() {
         child: buildPage(),
       ),
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -420));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -420));
+    await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
   });

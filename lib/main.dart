@@ -598,7 +598,11 @@ class _MainTabControllerState extends State<MainTabController>
     final record = allConsumedItems[index];
     _undoDietRecord = record;
     _undoDietIndex = index;
-    setState(() => allConsumedItems.removeAt(index));
+    setState(() {
+      allConsumedItems = allConsumedItems
+          .where((item) => item.id != recordId)
+          .toList();
+    });
     _queueDietDelete(record.id);
     await _saveData();
     _rootMessengerKey.currentState
@@ -4622,10 +4626,29 @@ class _MainTabControllerState extends State<MainTabController>
     return result;
   }
 
+  List<FoodItem> _recentFoodPickerItems(String mealType) {
+    return _nutritionQuickAccessService
+        .recentFoods(records: allConsumedItems, mealType: mealType)
+        .map(
+          (food) => FoodItem(
+            id: 'recent_${food.normalizedKey}',
+            name: food.displayName,
+            protein: food.amount > 0 ? food.protein * 100 / food.amount : 0,
+            carbs: food.amount > 0 ? food.carbs * 100 / food.amount : 0,
+            fat: food.amount > 0 ? food.fat * 100 / food.amount : 0,
+            calories: food.amount > 0 ? food.kcal * 100 / food.amount : 0,
+            category: '最近吃过',
+            unit: food.unit,
+            weightPerUnit: food.unit.isEmpty ? 0 : food.amount,
+          ),
+        )
+        .toList();
+  }
+
   void _showFoodPicker(BuildContext context, String mealType) {
     final searchCtrl = TextEditingController();
     List<FoodItem>? searchResults;
-    final categories = ['全部', '主食', '肉蛋奶', '蔬菜', '水果', '饮料', '其他'];
+    final categories = ['最近吃过', '全部', '主食', '肉蛋奶', '蔬菜', '水果', '饮料', '其他'];
 
     showModalBottomSheet(
       context: context,
@@ -4640,6 +4663,7 @@ class _MainTabControllerState extends State<MainTabController>
             final query = kw.trim();
             if (query.isEmpty) return;
             final localMatches = _pickerFoods()
+                .followedBy(_recentFoodPickerItems(mealType))
                 .where((food) => food.name.contains(query))
                 .toList();
             if (localMatches.isNotEmpty) {
@@ -4674,8 +4698,39 @@ class _MainTabControllerState extends State<MainTabController>
                         Wrap(
                           spacing: 0,
                           children: [
-                            IconButton(
-                              tooltip: 'AI 饮食录入',
+                            TextButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _showCopyYesterdaySheet(mealType);
+                              },
+                              icon: const Icon(Icons.copy_outlined, size: 16),
+                              label: const Text('复制昨日'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.black45,
+                                minimumSize: Size.zero,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () =>
+                                  _showAddCustomFoodDialog(setModalState),
+                              icon: const Icon(Icons.edit_note, size: 16),
+                              label: const Text('自定义食物'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.black45,
+                                minimumSize: Size.zero,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                textStyle: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            TextButton.icon(
                               onPressed: () {
                                 Navigator.pop(context);
                                 unawaited(
@@ -4688,30 +4743,16 @@ class _MainTabControllerState extends State<MainTabController>
                                   ),
                                 );
                               },
-                              icon: const Icon(
-                                Icons.auto_awesome,
-                                color: GoatApp.marsGreen,
-                                size: 20,
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: () {
-                                Navigator.pop(context);
-                                _showCopyYesterdaySheet(mealType);
-                              },
-                              icon: const Icon(Icons.copy_outlined, size: 17),
-                              label: const Text('复制昨日'),
+                              icon: const Icon(Icons.auto_awesome, size: 16),
+                              label: const Text('AI录入'),
                               style: TextButton.styleFrom(
                                 foregroundColor: GoatApp.marsGreen,
-                              ),
-                            ),
-                            TextButton.icon(
-                              onPressed: () =>
-                                  _showAddCustomFoodDialog(setModalState),
-                              icon: const Icon(Icons.edit_note, size: 17),
-                              label: const Text('自定义'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: GoatApp.marsGreen,
+                                minimumSize: Size.zero,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                textStyle: const TextStyle(fontSize: 12),
                               ),
                             ),
                           ],
@@ -4856,7 +4897,10 @@ class _MainTabControllerState extends State<MainTabController>
                         : TabBarView(
                             children: categories.map((cat) {
                               final filteredList =
-                                  (searchResults ?? _pickerFoods())
+                                  (searchResults ??
+                                          (cat == '最近吃过'
+                                              ? _recentFoodPickerItems(mealType)
+                                              : _pickerFoods()))
                                       .where(
                                         (f) =>
                                             searchResults != null ||
@@ -4869,7 +4913,9 @@ class _MainTabControllerState extends State<MainTabController>
                               if (filteredList.isEmpty) {
                                 return Center(
                                   child: Text(
-                                    '该分类暂无食物\n快在上方呼叫 DeepSeek 扩充吧！',
+                                    cat == '最近吃过'
+                                        ? '完成一次饮食记录后，常用食物会显示在这里'
+                                        : '该分类暂无食物\n快在上方呼叫 DeepSeek 扩充吧！',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
                                       color: Colors.black26,

@@ -34,8 +34,6 @@ import 'services/local_storage_service.dart';
 import 'services/nutrition_ai_service.dart';
 import 'services/speech_recognition_service.dart';
 import 'services/nutrition_quick_access_service.dart';
-import 'features/dashboard/dashboard_data.dart';
-import 'features/dashboard/dashboard_page.dart';
 
 export 'models/consumed_record.dart';
 export 'models/daily_macro_stats.dart';
@@ -314,6 +312,9 @@ class _MainTabControllerState extends State<MainTabController>
       _activeNamespace = _storage!.namespaceForUser(_activeUserId);
       await _mergeGuestDataIfNeeded();
       await _loadLocalData();
+      if (!dailyWeight.containsKey(todayStr)) {
+        dailyWeight[todayStr] = currentWeight;
+      }
     } catch (e) {
       debugPrint('本地数据初始化失败: $e');
     } finally {
@@ -2380,62 +2381,92 @@ class _MainTabControllerState extends State<MainTabController>
   }
 
   Widget _buildDashboardPage() {
-    final data = DashboardData.fromState(
-      date: viewDateStr,
-      isToday: isToday,
-      consumedRecords: allConsumedItems,
-      exerciseRecords: allExerciseItems,
-      trainingSessions: allTrainingSessions,
-      calorieTarget: targetKcal,
-      proteinTarget: targetP,
-      carbsTarget: targetC,
-      fatTarget: targetF,
-      waterMl: _waterTotalForDate(viewDateStr),
-      waterGoalMl: 2500,
-      weightKg: dailyWeight[viewDateStr] ?? currentWeight,
-      showAiTip: deepSeekApiKey.trim().isNotEmpty,
-      isAiTipLoading: _isAiTipLoading,
-      aiTip: _currentAiTip,
-    );
-    return DashboardPage(
-      data: data,
-      onOpenAssistant: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatAssistantPage(
-              userData:
-                  "性别:$gender, 生日:$birthYear-$birthMonth-$birthDay, 身高:${height.toInt()}cm, 体重:${_formatWeight(currentWeight)}",
-            ),
-          ),
-        );
-      },
-      onOpenSettings: _showTargetSettingsDialog,
-      onRecordDiet: () => _showFoodPicker(
-        context,
-        DashboardData.defaultMealTypeForHour(DateTime.now().hour),
-      ),
-      onRecordWater: _showWaterTrackingPage,
-      onRecordExercise: _showExerciseAddDialog,
-      onRecordWeight: _showWeightPickerForDate,
-      onOpenMeal: _openDashboardMeal,
-      onAddMeal: (mealType) => _showFoodPicker(context, mealType),
-      onOpenTraining: () => setState(() => _currentIndex = 2),
-      onRefreshAi: _fetchDailyAiTip,
-    );
-  }
+    final stats = _getDailyStats(viewDateStr);
+    final consumed = allConsumedItems
+        .where((i) => i.date == viewDateStr)
+        .toList();
+    final exercise = allExerciseItems
+        .where((i) => i.date == viewDateStr)
+        .toList();
 
-  void _openDashboardMeal(String mealType) {
-    final records = allConsumedItems.where((record) {
-      if (record.date != viewDateStr) return false;
-      if (mealType == '加餐') {
-        return record.mealType != '早餐' &&
-            record.mealType != '午餐' &&
-            record.mealType != '晚餐';
-      }
-      return record.mealType == mealType;
-    }).toList();
-    _showMealDetailPopup(mealType, mealType, records);
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF4F5F7),
+        elevation: 0,
+        centerTitle: false,
+        title: Text(
+          isToday ? 'G O A T' : 'HISTORY',
+          style: const TextStyle(
+            fontWeight: FontWeight.w200,
+            letterSpacing: 4.0,
+            fontSize: 18,
+          ),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(
+              Icons.auto_awesome,
+              color: GoatApp.marsGreen,
+              size: 24,
+            ),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatAssistantPage(
+                    userData:
+                        "性别:$gender, 生日:$birthYear-$birthMonth-$birthDay, 身高:${height.toInt()}cm, 体重:${_formatWeight(currentWeight)}",
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(
+              Icons.edit_note_rounded,
+              color: GoatApp.marsGreen,
+              size: 24,
+            ),
+            onPressed: () => _showFoodPicker(context, '加餐'),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20.0),
+        children: [
+          _buildMacronutrientsCard(stats, showEditSettings: true),
+          const SizedBox(height: 16),
+          if (aiDismissedDate != viewDateStr) ...[
+            GestureDetector(
+              onTap: _fetchDailyAiTip,
+              child: AIRecommendationCard(
+                isLoading: _isAiTipLoading,
+                content: _isAiTipLoading
+                    ? "GOAT AI 正在分析今日数据..."
+                    : _currentAiTip,
+                onClose: _isAiTipLoading
+                    ? null
+                    : () {
+                        setState(() => aiDismissedDate = viewDateStr);
+                        _saveLocalPreferencesOnly();
+                      },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          _buildWaterWeightRow(
+            _waterTotalForDate(viewDateStr),
+            dailyWeight[viewDateStr] ?? 0.0,
+          ),
+          const SizedBox(height: 16),
+          _buildDietGrid(consumed),
+          const SizedBox(height: 16),
+          _buildExerciseSection(exercise, stats.burn),
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
   }
 
   // --- 历史页面 ---
@@ -3807,6 +3838,115 @@ class _MainTabControllerState extends State<MainTabController>
   // ============================================================================
   // 5. 局部 UI 组件构建
   // ============================================================================
+  Widget _buildMacronutrientsCard(
+    DailyMacroStats stats, {
+    bool showEditSettings = false,
+  }) {
+    double netKcal = stats.kcalIn - stats.burn;
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Stack(
+        children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '今日摄入 (kcal)',
+                style: TextStyle(
+                  color: Colors.black26,
+                  fontSize: 10,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${stats.kcalIn.toInt()}',
+                style: const TextStyle(
+                  fontSize: 48,
+                  fontWeight: FontWeight.bold,
+                  color: GoatApp.marsGreen,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _miniStat('摄入', stats.kcalIn.toInt(), Colors.black87),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('-', style: TextStyle(color: Colors.black26)),
+                  ),
+                  _miniStat('消耗', stats.burn.toInt(), Colors.black87),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('=', style: TextStyle(color: Colors.black26)),
+                  ),
+                  _miniStat('净摄入', netKcal.toInt(), GoatApp.marsGreen),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('/', style: TextStyle(color: Colors.black26)),
+                  ),
+                  _miniStat('目标', targetKcal.toInt(), Colors.black38),
+                ],
+              ),
+              const SizedBox(height: 28),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: _semiCircleWithLabel(
+                        'PRO',
+                        stats.p,
+                        targetP,
+                        GoatApp.marsGreen,
+                      ),
+                    ),
+                    Expanded(
+                      child: _semiCircleWithLabel(
+                        'CHO',
+                        stats.c,
+                        targetC,
+                        const Color(0xFF4DB6AC),
+                      ),
+                    ),
+                    Expanded(
+                      child: _semiCircleWithLabel(
+                        'FAT',
+                        stats.f,
+                        targetF,
+                        const Color(0xFF80CBC4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (showEditSettings)
+            Positioned(
+              right: -10,
+              top: -10,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.tune_rounded,
+                  color: Colors.black26,
+                  size: 20,
+                ),
+                onPressed: _showTargetSettingsDialog,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _miniStat(String label, int val, Color col) => Column(
     children: [
       Text(label, style: const TextStyle(fontSize: 10, color: Colors.black26)),
@@ -3852,6 +3992,32 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
+  Widget _buildWaterWeightRow(int water, double weight) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildDataCard(
+            '饮水 (ml)',
+            '${water == 0 ? '--' : water}',
+            Icons.water_drop_outlined,
+            Colors.blueAccent,
+            () => _showWaterTrackingPage(),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _buildDataCard(
+            '体重 (kg)',
+            weight == 0 ? '--' : _formatWeight(weight),
+            Icons.monitor_weight_outlined,
+            Colors.orangeAccent,
+            () => _showWeightPickerForDate(),
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _showWaterTrackingPage() async {
     await showWaterTrackingPage(
       context: context,
@@ -3882,6 +4048,152 @@ class _MainTabControllerState extends State<MainTabController>
         });
         _saveData();
       },
+    );
+  }
+
+  Widget _buildDataCard(
+    String title,
+    String val,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  val,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDietGrid(List<ConsumedRecord> consumed) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildMealCard(
+                '早餐',
+                consumed.where((e) => e.mealType == '早餐').toList(),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _buildMealCard(
+                '午餐',
+                consumed.where((e) => e.mealType == '午餐').toList(),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _buildMealCard(
+                '晚餐',
+                consumed.where((e) => e.mealType == '晚餐').toList(),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _buildMealCard(
+                '加餐/补剂',
+                consumed
+                    .where(
+                      (e) =>
+                          e.mealType != '早餐' &&
+                          e.mealType != '午餐' &&
+                          e.mealType != '晚餐',
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMealCard(String title, List<ConsumedRecord> meals) {
+    double mealKcal = meals.fold(0, (sum, item) => sum + item.kcal);
+    return GestureDetector(
+      onTap: () => _showMealDetailPopup(title, title, meals),
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${mealKcal.toInt()} kcal',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: GoatApp.marsGreen,
+                  ),
+                ),
+              ],
+            ),
+            IconButton(
+              tooltip: '快速记录',
+              onPressed: () => _showFoodPicker(context, title),
+              icon: const Icon(
+                Icons.add_circle_outline,
+                color: GoatApp.marsGreen,
+                size: 22,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

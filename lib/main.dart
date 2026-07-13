@@ -21,12 +21,14 @@ import 'models/water_intake_record.dart';
 import 'models/app_snapshot.dart';
 import 'models/parsed_diet_item.dart';
 import 'models/pending_cloud_deletes.dart';
+import 'models/sync_operation.dart';
 import 'features/nutrition/nutrition_quick_add_sheet.dart';
 import 'features/nutrition/copy_diet_sheet.dart';
 import 'features/nutrition/edit_diet_record_sheet.dart';
 import 'features/voice_entry/voice_entry_sheet.dart';
 import 'features/tracking/weight_picker_sheet.dart';
 import 'features/training/exercise_time.dart';
+import 'features/training/training_page.dart';
 import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
 import 'repositories/water_tracking_repository.dart';
@@ -388,9 +390,13 @@ class _MainTabControllerState extends State<MainTabController>
   Future<void> _saveData() async {
     final snapshot = _snapshotFromState();
     final user = supabase.auth.currentUser;
-    if (user != null && !user.isAnonymous) {
+    var readyOperations = const <SyncOperation>[];
+    if (user != null &&
+        !user.isAnonymous &&
+        _cloudSyncService.versionedSyncEnabled) {
       _syncQueue.enqueueSnapshot(userId: user.id, snapshot: snapshot);
-      for (final operation in _syncQueue.ready()) {
+      readyOperations = _syncQueue.ready();
+      for (final operation in readyOperations) {
         SyncDiagnostics.queue(
           operationId: operation.operationId,
           entityType: operation.entityType,
@@ -404,11 +410,19 @@ class _MainTabControllerState extends State<MainTabController>
 
     try {
       final processedDeletes = await _cloudSyncService
-          .syncSnapshot(user: user, snapshot: snapshot)
+          .syncSnapshot(
+            user: user,
+            snapshot: snapshot,
+            operations: readyOperations,
+          )
           .timeout(const Duration(seconds: 15));
       _pendingCloudDeletes = _pendingCloudDeletes.without(processedDeletes);
-      _syncQueue.markAllSucceeded();
-      _syncQueue.advanceCursor(DateTime.now().toUtc());
+      if (_cloudSyncService.versionedSyncEnabled) {
+        for (final operation in readyOperations) {
+          _syncQueue.markSucceeded(operation.operationId);
+        }
+        _syncQueue.advanceCursor(DateTime.now().toUtc());
+      }
       await _storage?.save(_activeNamespace, _snapshotFromState());
       if (_guestMergePending && _storage != null) {
         await _storage!.clearNamespace(_storage!.namespaceForUser(null));
@@ -416,8 +430,10 @@ class _MainTabControllerState extends State<MainTabController>
       }
       _cloudSyncPending = false;
     } catch (e) {
-      for (final operation in _syncQueue.ready()) {
-        _syncQueue.markFailed(operation.operationId);
+      if (_cloudSyncService.versionedSyncEnabled) {
+        for (final operation in _syncQueue.ready()) {
+          _syncQueue.markFailed(operation.operationId);
+        }
       }
       await _saveLocalPreferencesOnly();
       _cloudSyncPending = true;
@@ -436,18 +452,25 @@ class _MainTabControllerState extends State<MainTabController>
     try {
       final cloudSnapshot = await _cloudSyncService.fetchSnapshot(
         user,
-        lastSyncedAt: enableVersionedCloudSync
+        lastSyncedAt: _cloudSyncService.versionedSyncEnabled
             ? _syncQueue.cursor.lastSyncedAt
             : null,
       );
       if (cloudSnapshot == null) return;
       final localSnapshot =
           _storage?.load(_activeNamespace) ?? AppSnapshot.empty();
-      final merged = localSnapshot
-          .merge(cloudSnapshot)
-          .applyDeletes(cloudSnapshot.pendingCloudDeletes);
+      final hasPendingVersionedWork =
+          _cloudSyncService.versionedSyncEnabled &&
+          _syncQueue.operations.isNotEmpty;
+      final merged =
+          (hasPendingVersionedWork
+                  ? localSnapshot.merge(cloudSnapshot)
+                  : cloudSnapshot.merge(localSnapshot))
+              .applyDeletes(cloudSnapshot.pendingCloudDeletes);
       _applySnapshot(merged);
-      _syncQueue.advanceCursor(DateTime.now().toUtc());
+      if (_cloudSyncService.versionedSyncEnabled) {
+        _syncQueue.advanceCursor(DateTime.now().toUtc());
+      }
       await _saveLocalPreferencesOnly();
       if (mounted) setState(() {});
     } catch (e) {
@@ -761,71 +784,75 @@ class _MainTabControllerState extends State<MainTabController>
   // 新增：力量训练主页构建逻辑 (必须放在 _MainTabControllerState 内部)
   // ============================================================================
   Widget _buildTrainingPage() {
-    // 根据你代码中日期字符串的变量名进行过滤。
-    // 如果你原本用于记录日期的变量不叫 viewDateStr，请在这里修改。
-    // 假设你全局用 selectedDate 这种变量，这里需要对应。通常在日历页会有这个变量。
-    final String currentDateStr = viewDateStr;
-    // 假设你目前还没有专门的全局游标日期，暂且先用今天的日期过滤。
-    // 如果你已经有了游标日期变量，把 currentDateStr 换成那个变量。
-
-    final todaysSessions = allTrainingSessions
-        .where((s) => s.date == currentDateStr)
-        .toList();
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4F5F7),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF4F5F7),
-        elevation: 0,
-        centerTitle: false,
-        title: const Text(
-          '训 练 计 划',
-          style: TextStyle(
-            fontWeight: FontWeight.w200,
-            letterSpacing: 4.0,
-            fontSize: 18,
-            color: Colors.black,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.add_circle,
-              color: GoatApp.marsGreen,
-              size: 28,
-            ),
-            onPressed: () =>
-                _showAddTrainingSessionSheet(currentDateStr), // 传入日期
-          ),
-          const SizedBox(width: 8),
-        ],
+    return TrainingPage(
+      sessions: allTrainingSessions,
+      businessDate: viewDateStr,
+      onStartTraining: () => _showAddTrainingSessionSheet(viewDateStr),
+      onAddRecord: () => _showAddTrainingSessionSheet(viewDateStr),
+      onAddTemplate: () =>
+          _showAddTrainingSessionSheet(viewDateStr, initialName: '自定义训练'),
+      onViewHistory: _showTrainingHistorySheet,
+      onSelectTemplate: (template) => _showAddTrainingSessionSheet(
+        viewDateStr,
+        initialName: '${template.title}部训练',
       ),
-      body: todaysSessions.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.fitness_center,
-                    size: 60,
-                    color: Colors.grey.withOpacity(0.3),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "今日还未安排力量训练",
-                    style: TextStyle(color: Colors.black38),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              itemCount: todaysSessions.length,
-              itemBuilder: (context, index) {
-                final session = todaysSessions[index];
-                return _buildTrainingSessionCard(session);
-              },
-            ),
+      onOpenSession: _showTrainingSessionDetails,
+    );
+  }
+
+  void _showTrainingHistorySheet() {
+    final sessions = [...allTrainingSessions]
+      ..sort((left, right) => right.date.compareTo(left.date));
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(sheetContext).size.height * 0.65,
+          child: sessions.isEmpty
+              ? const Center(child: Text('暂无训练记录'))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(20),
+                  itemCount: sessions.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, index) {
+                    final session = sessions[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(session.name),
+                      subtitle: Text(
+                        '${session.date} · ${session.exercises.length} 个动作',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _showTrainingSessionDetails(session);
+                      },
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+
+  void _showTrainingSessionDetails(TrainingSession session) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+          child: _buildTrainingSessionCard(session),
+        ),
+      ),
     );
   }
 
@@ -1087,11 +1114,11 @@ class _MainTabControllerState extends State<MainTabController>
   void _showAddTrainingSessionSheet(
     String dateStr, {
     TrainingSession? existingSession,
+    String? initialName,
   }) {
     // 如果是编辑模式，默认填入旧名称；否则显示默认提示
-    String sessionName = existingSession?.name ?? "新训练课 (例: 推日/拉日)";
     final TextEditingController nameController = TextEditingController(
-      text: existingSession?.name ?? "",
+      text: existingSession?.name ?? initialName ?? "",
     );
 
     showModalBottomSheet(

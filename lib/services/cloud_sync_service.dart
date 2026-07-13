@@ -7,24 +7,25 @@ import '../models/consumed_record.dart';
 import '../models/exercise_record.dart';
 import '../models/food_item.dart';
 import '../models/pending_cloud_deletes.dart';
+import '../models/sync_operation.dart';
 import '../repositories/sync_repository.dart';
-
-const bool enableVersionedCloudSync = bool.fromEnvironment(
-  'GOAT_ENABLE_VERSIONED_CLOUD_SYNC',
-  defaultValue: false,
-);
+import 'versioned_sync_rollout.dart';
 
 class CloudSyncService implements SyncRepository {
   final SupabaseClient client;
+  final bool versionedSyncEnabled;
 
-  CloudSyncService(this.client);
+  CloudSyncService(this.client, {bool? enableVersionedSync})
+    : versionedSyncEnabled = enableVersionedSync ?? enableVersionedCloudSync;
 
   @override
   Future<PendingCloudDeletes> syncSnapshot({
     required User user,
     required AppSnapshot snapshot,
+    List<SyncOperation> operations = const [],
   }) async {
-    if (enableVersionedCloudSync) {
+    if (versionedSyncEnabled) {
+      await _syncOperations(user, operations);
       await _upsertTombstones(user, snapshot.pendingCloudDeletes);
     }
     await client.from('user_profiles').upsert({
@@ -130,17 +131,46 @@ class CloudSyncService implements SyncRepository {
           .inFilter('date', pendingDates);
     }
 
-    if (enableVersionedCloudSync) {
+    if (versionedSyncEnabled) {
       await _syncWaterRecords(user, snapshot);
       await _syncWeightRecords(user, snapshot);
+      await _syncTrainingSessions(user, snapshot);
     }
 
     // The compatibility path can still sync the phase-one tables before the
     // additive migration is deployed. Once enabled, all delete IDs are safe
     // to acknowledge because their tombstones were written first.
-    return enableVersionedCloudSync
+    return versionedSyncEnabled
         ? snapshot.pendingCloudDeletes
         : snapshot.pendingCloudDeletes.copyWith(waterRecordIds: const {});
+  }
+
+  Future<void> _syncOperations(
+    User user,
+    Iterable<SyncOperation> operations,
+  ) async {
+    final rows = operations
+        .where(
+          (operation) =>
+              operation.userId == user.id &&
+              operation.entityType != 'nutrition-ai',
+        )
+        .map(
+          (operation) => {
+            'operation_id': operation.operationId,
+            'user_id': user.id,
+            'entity_type': operation.entityType,
+            'entity_id': operation.entityId,
+            'action': operation.action.name,
+            'payload': operation.payload,
+          },
+        )
+        .toList();
+    if (rows.isNotEmpty) {
+      await client
+          .from('client_operations')
+          .upsert(rows, onConflict: 'user_id,operation_id');
+    }
   }
 
   Future<void> _syncWaterRecords(User user, AppSnapshot snapshot) async {
@@ -182,6 +212,25 @@ class CloudSyncService implements SyncRepository {
         .toList();
     if (rows.isNotEmpty) {
       await client.from('body_weight_logs').upsert(rows);
+    }
+  }
+
+  Future<void> _syncTrainingSessions(User user, AppSnapshot snapshot) async {
+    final rows = snapshot.training
+        .map(
+          (session) => {
+            'id': session.id,
+            'user_id': user.id,
+            'name': session.name,
+            'date': session.date,
+            'exercises': session.exercises
+                .map((exercise) => exercise.toJson())
+                .toList(),
+          },
+        )
+        .toList();
+    if (rows.isNotEmpty) {
+      await client.from('training_sessions').upsert(rows);
     }
   }
 
@@ -231,7 +280,7 @@ class CloudSyncService implements SyncRepository {
     User user, {
     DateTime? lastSyncedAt,
   }) async {
-    final useIncremental = enableVersionedCloudSync && lastSyncedAt != null;
+    final useIncremental = versionedSyncEnabled && lastSyncedAt != null;
     final profile = await client
         .from('user_profiles')
         .select()
@@ -267,9 +316,10 @@ class CloudSyncService implements SyncRepository {
 
     List<Map<String, dynamic>> waterRecords = const [];
     List<Map<String, dynamic>> bodyWeights = const [];
+    List<Map<String, dynamic>> trainingSessions = const [];
     List<Map<String, dynamic>> tombstones = const [];
     Set<String> tombstoneKeys = const {};
-    if (enableVersionedCloudSync) {
+    if (versionedSyncEnabled) {
       final waterQuery = client
           .from('water_intake_records')
           .select()
@@ -282,14 +332,20 @@ class CloudSyncService implements SyncRepository {
           .from('sync_tombstones')
           .select('entity_type, entity_id')
           .eq('user_id', user.id);
+      final trainingQuery = client
+          .from('training_sessions')
+          .select()
+          .eq('user_id', user.id);
       if (useIncremental) {
         final cursor = lastSyncedAt.toUtc().toIso8601String();
         waterQuery.gt('updated_at', cursor);
         weightQuery.gt('updated_at', cursor);
         tombstoneQuery.gt('updated_at', cursor);
+        trainingQuery.gt('updated_at', cursor);
       }
       waterRecords = List<Map<String, dynamic>>.from(await waterQuery);
       bodyWeights = List<Map<String, dynamic>>.from(await weightQuery);
+      trainingSessions = List<Map<String, dynamic>>.from(await trainingQuery);
       tombstones = List<Map<String, dynamic>>.from(await tombstoneQuery);
       tombstoneKeys = {
         for (final row in tombstones)
@@ -298,9 +354,7 @@ class CloudSyncService implements SyncRepository {
     }
 
     final trainingJson = profile?['training_data'];
-    final training = trainingJson is String
-        ? jsonDecode(trainingJson)
-        : trainingJson;
+    final legacyTraining = decodeLegacyTrainingData(trainingJson);
     final tombstoneDeletes = PendingCloudDeletes(
       foodIds: {
         for (final row in tombstonesForType(tombstones, 'food_dictionary'))
@@ -378,7 +432,18 @@ class CloudSyncService implements SyncRepository {
             },
           )
           .toList(),
-      'training': training is List ? training : const [],
+      'training': trainingSessions.isNotEmpty
+          ? trainingSessions
+                .map(
+                  (row) => {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'date': row['date'],
+                    'exercises': row['exercises'],
+                  },
+                )
+                .toList()
+          : (legacyTraining is List ? legacyTraining : const []),
       'waterRecords': waterRecords
           .where(
             (row) =>
@@ -403,6 +468,17 @@ class CloudSyncService implements SyncRepository {
       },
       'pendingCloudDeletes': tombstoneDeletes.toJson(),
     });
+  }
+}
+
+Object? decodeLegacyTrainingData(Object? value) {
+  if (value is! String) return value;
+  if (value.trim().isEmpty) return const [];
+  try {
+    final decoded = jsonDecode(value);
+    return decoded is List ? decoded : const [];
+  } on FormatException {
+    return const [];
   }
 }
 

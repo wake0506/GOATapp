@@ -42,6 +42,13 @@ This file is updated with command results after the refactor and final quality c
 - DeepSeek keys are supplied only through `--dart-define`; no local key is documented or committed.
 - Debug APK size is not a release APK size guarantee.
 
+## Phase 2A nutrition fast entry
+
+- The default quick-entry path is text-first. System speech is an experimental opt-in controlled by `ENABLE_SYSTEM_SPEECH=true`.
+- Recent-food suggestions are derived from `ConsumedRecord` history using conservative name normalization; authoritative food nutrition data is not yet connected.
+- AI parsing remains optional. Recent foods, repeat actions, and copy-yesterday do not require a DeepSeek key.
+- Multi-device conflict resolution remains a phase-one limitation.
+
 ## Speech recognition verification status
 
 - The speech service now uses an incrementing session ID and ignores callbacks from stale or cancelled sessions.

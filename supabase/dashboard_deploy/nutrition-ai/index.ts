@@ -34,6 +34,9 @@ type ClaimState =
   | { status: 'IN_PROGRESS'; claimToken: null; response: null }
   | { status: 'CACHED'; claimToken: null; response: unknown };
 
+type EnvironmentReader = (name: string) => string | undefined;
+export type NutritionAiClientFactory = typeof createClient;
+
 export function parseDefaultKey(value: string | undefined): string | null {
   if (!value) return null;
   try {
@@ -126,7 +129,7 @@ export function validateCachedResponse(value: unknown): ValidatedAiResponse {
   };
 }
 
-function parseClaimState(value: unknown): ClaimState {
+export function parseClaimState(value: unknown): ClaimState {
   if (!value || typeof value !== 'object') throw new Error('INVALID_CLAIM_STATE');
   const state = value as Record<string, unknown>;
   if (state.status === 'CLAIMED' && typeof state.claimToken === 'string') {
@@ -162,6 +165,8 @@ function stripFence(value: string): string {
 
 export function createNutritionAiHandler(
   fetchImpl: typeof fetch = fetch,
+  clientFactory: NutritionAiClientFactory = createClient,
+  readEnv: EnvironmentReader = (name) => Deno.env.get(name),
 ): (request: Request) => Promise<Response> {
   return async (request: Request) => {
     if (request.method === 'OPTIONS') {
@@ -178,17 +183,17 @@ export function createNutritionAiHandler(
       : '';
     if (!token) return errorResponse('UNAUTHORIZED', '请先登录', 401, requestId);
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseUrl = readEnv('SUPABASE_URL') ?? '';
     const publishableKey =
-      Deno.env.get('SUPABASE_ANON_KEY') ??
-      parseDefaultKey(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS'));
+      readEnv('SUPABASE_ANON_KEY') ??
+      parseDefaultKey(readEnv('SUPABASE_PUBLISHABLE_KEYS'));
     const secretKey =
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
-      parseDefaultKey(Deno.env.get('SUPABASE_SECRET_KEYS'));
+      readEnv('SUPABASE_SERVICE_ROLE_KEY') ??
+      parseDefaultKey(readEnv('SUPABASE_SECRET_KEYS'));
     if (!publishableKey || !secretKey) {
-      return errorResponse('EDGE_CONFIGURATION_ERROR', '服务配置错误', 500, requestId);
+      return errorResponse('CONFIGURATION_ERROR', '服务配置错误', 500, requestId);
     }
-    const userClient = createClient(supabaseUrl, publishableKey, {
+    const userClient = clientFactory(supabaseUrl, publishableKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
     const { data: authData, error: authError } = await userClient.auth.getUser(token);
@@ -215,12 +220,12 @@ export function createNutritionAiHandler(
       return errorResponse(code, '请求参数无效', 400, requestId);
     }
 
-    const providerKey = Deno.env.get('DEEPSEEK_API_KEY');
+    const providerKey = readEnv('DEEPSEEK_API_KEY');
     if (!providerKey) {
       return errorResponse('AI_NOT_CONFIGURED', 'AI 服务暂未配置', 503, requestId);
     }
 
-    const adminClient = createClient(supabaseUrl, secretKey, {
+    const adminClient = clientFactory(supabaseUrl, secretKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 

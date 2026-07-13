@@ -24,18 +24,21 @@ as $$
   with base as (
     select upper(trim(coalesce(p.cmd, ''))) as cmd,
       upper(trim(coalesce(p.permissive, ''))) as permissive,
+      p.roles,
       regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g') as qual_text,
       regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text
     from pg_policies p
     where p.schemaname = 'public' and p.tablename = p_table_name
   ), policy_text as (
-    select cmd, permissive, qual_text,
+    select cmd, permissive, roles, qual_text,
       case when check_text = '' then qual_text else check_text end as effective_check
     from base
   )
   select exists (
     select 1 from policy_text p
     where p.permissive = 'PERMISSIVE'
+      and (array_position(p.roles, 'public'::name) is not null
+           or array_position(p.roles, 'authenticated'::name) is not null)
       and p.cmd in (upper(p_command), 'ALL')
       and (
         (p_command = 'SELECT' and
@@ -85,6 +88,8 @@ begin
         select 1 from pg_policies p
         where p.schemaname = 'public' and p.tablename = table_name
           and upper(trim(coalesce(p.permissive, ''))) = 'PERMISSIVE'
+          and (array_position(p.roles, 'public'::name) is not null
+               or array_position(p.roles, 'authenticated'::name) is not null)
           and upper(trim(coalesce(p.cmd, ''))) in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
       ) then
         raise exception 'POLICY_REVIEW_REQUIRED: ai_usage_daily has a permissive write policy';
@@ -93,6 +98,8 @@ begin
         select 1 from pg_policies p
         where p.schemaname = 'public' and p.tablename = table_name
           and upper(trim(coalesce(p.permissive, ''))) = 'PERMISSIVE'
+          and (array_position(p.roles, 'public'::name) is not null
+               or array_position(p.roles, 'authenticated'::name) is not null)
           and upper(trim(coalesce(p.cmd, ''))) in ('SELECT', 'ALL')
           and not (
             position('auth.uid=' || column_name in
@@ -110,12 +117,15 @@ begin
       select 1 from (
         select upper(trim(coalesce(p.cmd, ''))) as cmd,
           upper(trim(coalesce(p.permissive, ''))) as permissive,
+          p.roles,
           regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g') as qual_text,
           regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text
         from pg_policies p
         where p.schemaname = 'public' and p.tablename = table_name
       ) p
       where p.permissive = 'PERMISSIVE'
+        and (array_position(p.roles, 'public'::name) is not null
+             or array_position(p.roles, 'authenticated'::name) is not null)
         and (
           (p.cmd in ('SELECT', 'ALL') and not (
             position('auth.uid=' || column_name in p.qual_text) > 0
@@ -194,22 +204,22 @@ begin
     non_ai := table_name = 'client_operations';
 
     if not public.goat_policy_is_safe(table_name, 'SELECT', column_name, false) then
-      execute format('create policy goat_dashboard_select_own on public.%I for select using (auth.uid() = %I)', table_name, column_name);
+      execute format('create policy goat_dashboard_select_own on public.%I for select to authenticated using (auth.uid() = %I)', table_name, column_name);
     end if;
     if not public.goat_policy_is_safe(table_name, 'INSERT', column_name, non_ai) then
-      execute format('create policy goat_dashboard_insert_own on public.%I for insert with check (auth.uid() = %I%s)',
+      execute format('create policy goat_dashboard_insert_own on public.%I for insert to authenticated with check (auth.uid() = %I%s)',
         table_name, column_name,
         case when non_ai then ' and entity_type <> ''nutrition-ai''' else '' end);
     end if;
     if not public.goat_policy_is_safe(table_name, 'UPDATE', column_name, non_ai) then
-      execute format('create policy goat_dashboard_update_own on public.%I for update using (auth.uid() = %I%s) with check (auth.uid() = %I%s)',
+      execute format('create policy goat_dashboard_update_own on public.%I for update to authenticated using (auth.uid() = %I%s) with check (auth.uid() = %I%s)',
         table_name, column_name,
         case when non_ai then ' and entity_type <> ''nutrition-ai''' else '' end,
         column_name,
         case when non_ai then ' and entity_type <> ''nutrition-ai''' else '' end);
     end if;
     if not public.goat_policy_is_safe(table_name, 'DELETE', column_name, non_ai) then
-      execute format('create policy goat_dashboard_delete_own on public.%I for delete using (auth.uid() = %I%s)',
+      execute format('create policy goat_dashboard_delete_own on public.%I for delete to authenticated using (auth.uid() = %I%s)',
         table_name, column_name,
         case when non_ai then ' and entity_type <> ''nutrition-ai''' else '' end);
     end if;
@@ -221,7 +231,7 @@ do $$
 begin
   if not public.goat_policy_is_safe('ai_usage_daily', 'SELECT', 'user_id', false) then
     create policy goat_dashboard_ai_usage_select_own
-      on public.ai_usage_daily for select using (auth.uid() = user_id);
+      on public.ai_usage_daily for select to authenticated using (auth.uid() = user_id);
   end if;
 end $$;
 

@@ -150,7 +150,7 @@ class CloudSyncService implements SyncRepository {
             'id': record.id,
             'user_id': user.id,
             'date': record.date,
-            'recorded_at': record.recordedAt.toUtc().toIso8601String(),
+            'recorded_at': record.recordedAt?.toUtc().toIso8601String(),
             'amount_ml': record.amountMl,
             'is_legacy_aggregate': record.isLegacyAggregate,
           },

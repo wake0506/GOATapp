@@ -121,7 +121,7 @@ create index if not exists body_weight_logs_updated_idx on public.body_weight_lo
 create index if not exists training_sessions_updated_idx on public.training_sessions (user_id, updated_at);
 create index if not exists sync_tombstones_updated_idx on public.sync_tombstones (user_id, updated_at);
 create index if not exists client_operations_nutrition_lease_idx
-  on public.client_operations (user_id, operation_id, claimed_at)
+  on public.client_operations (user_id, operation_id, claimed_at, claim_token)
   where entity_type = 'nutrition-ai' and response is null;
 
 select public.goat_add_check_if_missing('user_profiles', 'user_profiles_weight_range',
@@ -140,6 +140,8 @@ select public.goat_add_check_if_missing('daily_tracking', 'daily_tracking_weight
   'weight_kg = 0 or (weight_kg >= 20 and weight_kg <= 300)');
 select public.goat_add_check_if_missing('water_intake_records', 'water_intake_amount_range',
   'amount_ml > 0 and amount_ml <= 10000');
+select public.goat_add_check_if_missing('water_intake_records', 'water_intake_legacy_time_consistent',
+  'is_legacy_aggregate = true or recorded_at is not null');
 select public.goat_add_check_if_missing('body_weight_logs', 'body_weight_range',
   'weight_kg >= 20 and weight_kg <= 300');
 select public.goat_add_check_if_missing('ai_usage_daily', 'ai_usage_nonnegative',
@@ -165,6 +167,8 @@ select public.goat_assert_constraint_clean('daily_tracking', 'daily_tracking_wei
   'weight_kg = 0 or (weight_kg >= 20 and weight_kg <= 300)');
 select public.goat_assert_constraint_clean('water_intake_records', 'water_intake_amount_range',
   'amount_ml > 0 and amount_ml <= 10000');
+select public.goat_assert_constraint_clean('water_intake_records', 'water_intake_legacy_time_consistent',
+  'is_legacy_aggregate = true or recorded_at is not null');
 select public.goat_assert_constraint_clean('body_weight_logs', 'body_weight_range',
   'weight_kg >= 20 and weight_kg <= 300');
 select public.goat_assert_constraint_clean('ai_usage_daily', 'ai_usage_nonnegative',
@@ -180,6 +184,7 @@ select public.goat_validate_constraint_if_needed('exercise_logs', 'exercise_logs
 select public.goat_validate_constraint_if_needed('daily_tracking', 'daily_tracking_water_nonnegative');
 select public.goat_validate_constraint_if_needed('daily_tracking', 'daily_tracking_weight_range');
 select public.goat_validate_constraint_if_needed('water_intake_records', 'water_intake_amount_range');
+select public.goat_validate_constraint_if_needed('water_intake_records', 'water_intake_legacy_time_consistent');
 select public.goat_validate_constraint_if_needed('body_weight_logs', 'body_weight_range');
 select public.goat_validate_constraint_if_needed('ai_usage_daily', 'ai_usage_nonnegative');
 select public.goat_validate_constraint_if_needed('client_operations', 'client_operations_action_valid');

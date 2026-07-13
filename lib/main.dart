@@ -549,7 +549,13 @@ class _MainTabControllerState extends State<MainTabController>
   List<WaterIntakeRecord> _waterRecordsForDate(String date) {
     final records =
         waterIntakeRecords.where((record) => record.date == date).toList()
-          ..sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+          ..sort((a, b) {
+            final aTime =
+                a.recordedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bTime =
+                b.recordedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return aTime.compareTo(bTime);
+          });
     return records;
   }
 

@@ -42,19 +42,22 @@ begin
   from public.daily_tracking
   where weight_kg <> 0 and (weight_kg < 20 or weight_kg > 300);
 
-  insert into public.water_intake_records (
+  insert into public.water_intake_records as existing (
     id, user_id, date, recorded_at, amount_ml, is_legacy_aggregate
   )
   select
     'legacy_water_' || user_id::text || '_' || to_char(date::date, 'YYYY-MM-DD'),
     user_id,
     date::date,
-    date::date::timestamptz,
+    null,
     water_ml,
     true
   from public.daily_tracking
   where water_ml > 0
-  on conflict (id) do nothing;
+  on conflict (id) do update
+    set recorded_at = null,
+        is_legacy_aggregate = true
+    where existing.is_legacy_aggregate = true;
 
   insert into public.body_weight_logs (id, user_id, date, weight_kg)
   select

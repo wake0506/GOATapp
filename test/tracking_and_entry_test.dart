@@ -141,7 +141,7 @@ void main() {
     expect(migrated.single.id, 'legacy_water_2026-07-13');
     expect(migrated.single.amountMl, 1850);
     expect(migrated.single.isLegacyAggregate, isTrue);
-    expect(migrated.single.recordedAt, DateTime.parse('2026-07-13'));
+    expect(migrated.single.recordedAt, isNull);
   });
 
   test('old snapshot water aggregate remains readable as a record', () {
@@ -199,6 +199,31 @@ void main() {
     await tester.tap(delete.first);
     await tester.pumpAndSettle();
     expect(repository.records, hasLength(1));
+  });
+
+  testWidgets('legacy water displays history summary without a fake time', (
+    tester,
+  ) async {
+    final repository = _FakeWaterRepository([
+      const WaterIntakeRecord(
+        id: 'legacy-water',
+        date: '2026-07-13',
+        recordedAt: null,
+        amountMl: 300,
+        isLegacyAggregate: true,
+      ),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: WaterTrackingPage(
+          date: '2026-07-13',
+          repository: repository,
+          onTotalChanged: (_) {},
+        ),
+      ),
+    );
+    expect(find.text('历史汇总'), findsOneWidget);
+    expect(find.text('00:00'), findsNothing);
   });
 
   test('water deletion uses an explicit pending delete id', () {

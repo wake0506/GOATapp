@@ -1,5 +1,6 @@
 import {
   parseRequestBody,
+  validateCachedResponse,
   validateAiItems,
 } from './index.ts';
 
@@ -113,6 +114,32 @@ Deno.test('oversized request id is rejected', () => {
     throw new Error('oversized request id was accepted');
   } catch (error) {
     if (!(error instanceof Error) || error.message !== 'INVALID_REQUEST_ID') {
+      throw error;
+    }
+  }
+});
+
+Deno.test('cached response is validated before reuse', () => {
+  const cached = validateCachedResponse({
+    items: [validItem],
+    requestId: 'request-1',
+    provider: 'deepseek',
+  });
+  if (cached.items.length !== 1 || cached.requestId !== 'request-1') {
+    throw new Error('cached response was not validated');
+  }
+});
+
+Deno.test('malformed cached response is rejected', () => {
+  try {
+    validateCachedResponse({
+      items: [{ ...validItem, kcal: -1 }],
+      requestId: 'request-1',
+      provider: 'deepseek',
+    });
+    throw new Error('malformed cached response was accepted');
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'INVALID_PROVIDER_RESPONSE') {
       throw error;
     }
   }

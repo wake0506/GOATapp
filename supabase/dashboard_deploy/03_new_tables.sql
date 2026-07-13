@@ -100,7 +100,7 @@ create table if not exists public.water_intake_records (
   id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   date date not null,
-  recorded_at timestamptz not null,
+  recorded_at timestamptz,
   amount_ml integer not null,
   is_legacy_aggregate boolean not null default false,
   version integer not null default 1,
@@ -158,6 +158,7 @@ create table if not exists public.client_operations (
   payload jsonb not null default '{}'::jsonb,
   response jsonb,
   claimed_at timestamptz,
+  claim_token uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (user_id, operation_id)
@@ -177,5 +178,7 @@ create table if not exists public.ai_usage_daily (
 -- Existing client_operations tables receive only the missing lease field.
 alter table public.client_operations
   add column if not exists claimed_at timestamptz;
+alter table public.client_operations
+  add column if not exists claim_token uuid;
 
 commit;

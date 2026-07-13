@@ -32,7 +32,8 @@ with expected(table_name, column_name, expected_type) as (
     ('water_intake_records', 'amount_ml', 'integer'),
     ('body_weight_logs', 'weight_kg', 'numeric'),
     ('client_operations', 'operation_id', 'text'),
-    ('client_operations', 'claimed_at', 'timestamp with time zone')
+    ('client_operations', 'claimed_at', 'timestamp with time zone'),
+    ('client_operations', 'claim_token', 'uuid')
 )
 select 'column:' || e.table_name || '.' || e.column_name as check_name,
        case when c.column_name is null then 'FAIL'
@@ -115,6 +116,7 @@ with expected(table_name, column_name, command, non_ai_guard) as (
   select p.tablename,
     upper(trim(coalesce(p.cmd, ''))) as cmd,
     upper(trim(coalesce(p.permissive, ''))) as permissive,
+    p.roles,
     regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g') as qual_text,
     regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text,
     case when regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') = ''
@@ -132,6 +134,8 @@ select 'policy:' || e.table_name || ':' || e.command as check_name,
               select 1 from policy_text p
               where p.tablename = e.table_name
                 and p.permissive = 'PERMISSIVE'
+                and (array_position(p.roles, 'public'::name) is not null
+                     or array_position(p.roles, 'authenticated'::name) is not null)
                 and p.cmd in (e.command, 'ALL')
                 and (
                   (e.command = 'SELECT' and
@@ -165,6 +169,8 @@ select 'policy:ai_usage_daily:write_denied' as check_name,
          where schemaname = 'public' and tablename = 'ai_usage_daily'
            and upper(trim(coalesce(permissive, ''))) = 'PERMISSIVE'
            and upper(trim(coalesce(cmd, ''))) in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+           and (array_position(roles, 'public'::name) is not null
+                or array_position(roles, 'authenticated'::name) is not null)
        ) then 'FAIL' else 'PASS' end as status,
        'ordinary authenticated users have no direct write policy' as details;
 
@@ -174,6 +180,8 @@ select 'policy:ai_usage_daily:select_own' as check_name,
          where schemaname = 'public' and tablename = 'ai_usage_daily'
            and upper(trim(coalesce(permissive, ''))) = 'PERMISSIVE'
            and upper(trim(coalesce(cmd, ''))) in ('SELECT', 'ALL')
+           and (array_position(roles, 'public'::name) is not null
+                or array_position(roles, 'authenticated'::name) is not null)
            and (
              position('auth.uid=user_id' in
                regexp_replace(lower(coalesce(qual, '')), '[[:space:]()]', '', 'g')) > 0
@@ -189,6 +197,8 @@ select 'policy:client_operations:nutrition_ai_write_guard' as check_name,
          where schemaname = 'public' and tablename = 'client_operations'
            and upper(trim(coalesce(permissive, ''))) = 'PERMISSIVE'
            and upper(trim(coalesce(cmd, ''))) in ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+           and (array_position(roles, 'public'::name) is not null
+                or array_position(roles, 'authenticated'::name) is not null)
            and (
              (upper(trim(coalesce(cmd, ''))) in ('INSERT', 'UPDATE', 'ALL') and
               position('entity_type<>''nutrition-ai''' in
@@ -208,6 +218,7 @@ with policy_text as (
   select p.tablename,
     upper(trim(coalesce(p.cmd, ''))) as cmd,
     upper(trim(coalesce(p.permissive, ''))) as permissive,
+    p.roles,
     regexp_replace(lower(coalesce(p.qual, '')), '[[:space:]()]', '', 'g') as qual_text,
     regexp_replace(lower(coalesce(p.with_check, '')), '[[:space:]()]', '', 'g') as check_text
   from pg_policies p where p.schemaname = 'public'
@@ -224,6 +235,8 @@ select 'policy:' || e.table_name || ':no_broad_permissive' as check_name,
        case when not exists (
          select 1 from policy_text p
          where p.tablename = e.table_name and p.permissive = 'PERMISSIVE'
+           and (array_position(p.roles, 'public'::name) is not null
+                or array_position(p.roles, 'authenticated'::name) is not null)
            and (
              (p.cmd in ('SELECT', 'ALL') and not (
                position('auth.uid=' || e.column_name in p.qual_text) > 0
@@ -267,6 +280,7 @@ with expected(table_name, constraint_name) as (
     ('daily_tracking', 'daily_tracking_water_nonnegative'),
     ('daily_tracking', 'daily_tracking_weight_range'),
     ('water_intake_records', 'water_intake_amount_range'),
+    ('water_intake_records', 'water_intake_legacy_time_consistent'),
     ('body_weight_logs', 'body_weight_range'),
     ('ai_usage_daily', 'ai_usage_nonnegative'),
     ('client_operations', 'client_operations_action_valid')
@@ -330,23 +344,28 @@ select 'duplicate_operation_ids' as check_name,
 -- 6. SECURITY DEFINER, fixed search_path and execute privileges for all AI RPCs.
 with expected(function_name, signature) as (
   values
-    ('consume_ai_quota', 'public.consume_ai_quota()'),
-    ('nutrition_ai_get_cached_response', 'public.nutrition_ai_get_cached_response(text)'),
-    ('nutrition_ai_claim_operation', 'public.nutrition_ai_claim_operation(text)'),
-    ('nutrition_ai_save_response', 'public.nutrition_ai_save_response(text,jsonb)'),
-    ('nutrition_ai_release_operation', 'public.nutrition_ai_release_operation(text)')
+    ('consume_ai_quota_for_user', 'public.consume_ai_quota_for_user(uuid)'),
+    ('nutrition_ai_get_cached_response', 'public.nutrition_ai_get_cached_response(uuid,text)'),
+    ('nutrition_ai_claim_operation', 'public.nutrition_ai_claim_operation(uuid,text)'),
+    ('nutrition_ai_save_response', 'public.nutrition_ai_save_response(uuid,text,uuid,jsonb)'),
+    ('nutrition_ai_release_operation', 'public.nutrition_ai_release_operation(uuid,text,uuid)')
 ), funcs as (
   select e.*, to_regprocedure(e.signature) as oid from expected e
 )
 select 'rpc:' || f.function_name as check_name,
        case when f.oid is null then 'FAIL'
             when not p.prosecdef then 'FAIL'
-            when not (p.proconfig @> array['search_path=public']) then 'FAIL'
-            when not coalesce(has_function_privilege('authenticated', f.oid, 'EXECUTE'), false) then 'FAIL'
+            when not (coalesce(p.proconfig, array[]::text[]) @> array['search_path=']) then 'FAIL'
+            when coalesce(has_function_privilege('service_role', f.oid, 'EXECUTE'), false) = false then 'FAIL'
+            when coalesce(has_function_privilege('authenticated', f.oid, 'EXECUTE'), false) then 'FAIL'
             when coalesce(has_function_privilege('anon', f.oid, 'EXECUTE'), false) then 'FAIL'
+            when exists (
+              select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+              where a.grantee = 0 and a.privilege_type = 'EXECUTE'
+            ) then 'FAIL'
             else 'PASS' end as status,
        case when f.oid is null then 'function is missing'
-            else 'SECURITY DEFINER, search_path=public, authenticated-only execute' end as details
+            else 'SECURITY DEFINER, empty search_path, service_role-only execute' end as details
 from funcs f
 left join pg_proc p on p.oid = f.oid
 order by f.function_name;
@@ -381,17 +400,46 @@ select 'rpc:old_consume_ai_quota:anon_authenticated_execute' as check_name,
 from old_rpc o;
 
 with expected as (
-  select to_regprocedure('public.nutrition_ai_claim_operation(text)') as oid
+  select to_regprocedure('public.nutrition_ai_claim_operation(uuid,text)') as oid
 )
 select 'rpc:nutrition_ai_claim_operation:lease' as check_name,
        case when e.oid is null then 'FAIL'
             when position('2 minutes' in pg_get_functiondef(p.oid)) > 0 then 'PASS'
             else 'FAIL' end as status,
-       'pending rows older than two minutes may be reclaimed by the same user' as details
+        'pending rows older than two minutes may be reclaimed by the same user' as details
 from expected e
 left join pg_proc p on p.oid = e.oid;
 
+with expected(function_name, signature) as (
+  values
+    ('nutrition_ai_claim_operation', 'public.nutrition_ai_claim_operation(uuid,text)'),
+    ('nutrition_ai_save_response', 'public.nutrition_ai_save_response(uuid,text,uuid,jsonb)'),
+    ('nutrition_ai_release_operation', 'public.nutrition_ai_release_operation(uuid,text,uuid)')
+), funcs as (
+  select e.function_name, to_regprocedure(e.signature) as oid from expected e
+)
+select 'rpc:' || f.function_name || ':claim_token_guard' as check_name,
+       case when f.oid is null then 'FAIL'
+            when position('claim_token' in pg_get_functiondef(f.oid)) = 0 then 'FAIL'
+            when f.function_name = 'nutrition_ai_claim_operation'
+              and position('claimed_at' in pg_get_functiondef(f.oid)) = 0 then 'FAIL'
+            else 'PASS' end as status,
+       'claim creates or matches claimed_at and claim_token' as details
+from funcs f;
+
 -- 7. Baseline preservation. Values are from the confirmed preflight.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'user_profiles'
+      and column_name = 'training_data'
+  ) then
+    raise exception 'FAIL: user_profiles.training_data column is missing';
+  end if;
+end $$;
+
 with checks(check_name, actual_count, expected_count) as (
   values
     ('baseline:user_profiles', (select count(*) from public.user_profiles), 1::bigint),
@@ -446,6 +494,18 @@ select 'baseline:legacy_water_total' as check_name,
        'legacy total=' || coalesce(sum(amount_ml), 0)::text || ' ml, expected=300 ml' as details
 from public.water_intake_records
 where is_legacy_aggregate = true;
+
+select 'baseline:legacy_water_has_no_time' as check_name,
+       case when count(*) = 0 then 'PASS' else 'FAIL' end as status,
+       'legacy recorded_at NULL rows with timestamps=' || count(*)::text as details
+from public.water_intake_records
+where is_legacy_aggregate = true and recorded_at is not null;
+
+select 'baseline:ordinary_water_has_time' as check_name,
+       case when count(*) = 0 then 'PASS' else 'FAIL' end as status,
+       'ordinary records with NULL recorded_at=' || count(*)::text as details
+from public.water_intake_records
+where is_legacy_aggregate = false and recorded_at is null;
 
 select 'baseline:daily_tracking_water_compatibility' as check_name,
        case when coalesce(sum(water_ml), 0) = 300 then 'PASS'

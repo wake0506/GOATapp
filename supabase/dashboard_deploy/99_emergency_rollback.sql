@@ -44,13 +44,14 @@ their names happen to match.
 
 -- Constraint metadata: never use these to hide invalid data; investigate first.
 -- alter table public.<table_name> drop constraint if exists <constraint_name>;
+-- alter table public.water_intake_records drop constraint if exists water_intake_legacy_time_consistent;
 
 -- RPC/helper metadata: only remove functions created by this package after review.
--- drop function if exists public.nutrition_ai_get_cached_response(text);
--- drop function if exists public.nutrition_ai_claim_operation(text);
--- drop function if exists public.nutrition_ai_save_response(text, jsonb);
--- drop function if exists public.nutrition_ai_release_operation(text);
--- drop function if exists public.consume_ai_quota();
+-- drop function if exists public.consume_ai_quota_for_user(uuid);
+-- drop function if exists public.nutrition_ai_get_cached_response(uuid, text);
+-- drop function if exists public.nutrition_ai_claim_operation(uuid, text);
+-- drop function if exists public.nutrition_ai_save_response(uuid, text, uuid, jsonb);
+-- drop function if exists public.nutrition_ai_release_operation(uuid, text, uuid);
 -- drop function if exists public.goat_policy_is_safe(text, text, text, boolean);
 -- drop function if exists public.goat_set_updated_at();
 -- drop function if exists public.goat_add_check_if_missing(text, text, text);

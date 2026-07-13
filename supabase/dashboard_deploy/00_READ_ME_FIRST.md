@@ -9,6 +9,10 @@
 `client_operations` 使用 `claimed_at` 实现两分钟租约。07 不创建或替换
 `delete_user()`，账号注销需单独安全审计。
 
+本 v4 包进一步将 AI RPC 限制为 `service_role`，Edge Function 使用用户 client
+验证 JWT、使用 admin client 调用 RPC；`SUPABASE_SECRET_KEYS` 优先，兼容
+`SUPABASE_SERVICE_ROLE_KEY`。legacy 饮水记录的 `recorded_at` 为 NULL，不代表具体时间。
+
 ## 已确认的数据基线
 
 部署后必须保留以下数据：

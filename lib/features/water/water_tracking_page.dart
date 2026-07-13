@@ -75,7 +75,11 @@ class _WaterTrackingPageState extends State<WaterTrackingPage> {
       } else {
         _records[index] = updated;
       }
-      _records.sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+      _records.sort((a, b) {
+        final aTime = a.recordedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bTime = b.recordedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return aTime.compareTo(bTime);
+      });
     });
     widget.onTotalChanged(_total);
   }
@@ -134,7 +138,10 @@ class _WaterTrackingPageState extends State<WaterTrackingPage> {
                         itemBuilder: (_, index) {
                           final record = _records[index];
                           final time =
-                              '${record.recordedAt.hour.toString().padLeft(2, '0')}:${record.recordedAt.minute.toString().padLeft(2, '0')}';
+                              record.isLegacyAggregate ||
+                                  record.recordedAt == null
+                              ? '历史汇总'
+                              : '${record.recordedAt!.hour.toString().padLeft(2, '0')}:${record.recordedAt!.minute.toString().padLeft(2, '0')}';
                           return Container(
                             decoration: BoxDecoration(
                               color: Colors.white,
@@ -144,9 +151,7 @@ class _WaterTrackingPageState extends State<WaterTrackingPage> {
                               color: Colors.transparent,
                               child: ListTile(
                                 title: Text(time),
-                                subtitle: record.isLegacyAggregate
-                                    ? const Text('历史汇总')
-                                    : null,
+                                subtitle: null,
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [

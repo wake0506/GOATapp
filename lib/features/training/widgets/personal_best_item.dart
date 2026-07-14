@@ -44,7 +44,7 @@ class PersonalBestItem extends StatelessWidget {
               TextSpan(
                 text: hasRecord ? _formatWeight(personalBest.weight!) : '--',
                 style: const TextStyle(
-                  color: Color(0xFF005A45),
+                  color: Color(0xFF008C8C),
                   fontSize: 28,
                   fontWeight: FontWeight.w700,
                 ),
@@ -53,7 +53,7 @@ class PersonalBestItem extends StatelessWidget {
                         TextSpan(
                           text: ' kg',
                           style: TextStyle(
-                            color: Color(0xFF31594E),
+                            color: Color(0xFF4E8585),
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),

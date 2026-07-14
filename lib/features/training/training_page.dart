@@ -45,6 +45,8 @@ class TrainingPage extends StatelessWidget {
             const SizedBox(height: 18),
             TrainingStatusCard(status: viewModel.status),
             const SizedBox(height: 14),
+            const TrainingAiInsightCard(),
+            const SizedBox(height: 14),
             TrainingQuickStartCard(
               onStartTraining: onStartTraining,
               onUsePplTemplate: onUsePplTemplate,
@@ -56,8 +58,6 @@ class TrainingPage extends StatelessWidget {
             TrainingLoadCard(loads: viewModel.muscleLoads),
             const SizedBox(height: 14),
             PersonalBestCard(personalBests: viewModel.personalBests),
-            const SizedBox(height: 14),
-            const TrainingAiInsightCard(),
           ],
         ),
       ),

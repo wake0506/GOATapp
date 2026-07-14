@@ -48,7 +48,7 @@ class TrainingQuickStartCard extends StatelessWidget {
                   children: [
                     const Icon(
                       Icons.fitness_center_outlined,
-                      color: Color(0xFF004D3A),
+                      color: Color(0xFF008C8C),
                       size: 29,
                     ),
                     const SizedBox(width: 13),
@@ -63,15 +63,15 @@ class TrainingQuickStartCard extends StatelessWidget {
                       ),
                     ),
                     Material(
-                      color: const Color(0xFF005A45),
+                      color: const Color(0xFF008C8C),
                       shape: const CircleBorder(),
                       child: InkWell(
                         onTap: onStartTraining,
                         customBorder: const CircleBorder(),
                         child: const SizedBox(
-                          width: 56,
-                          height: 56,
-                          child: Icon(Icons.add, color: Colors.white, size: 32),
+                          width: 50,
+                          height: 50,
+                          child: Icon(Icons.add, color: Colors.white, size: 28),
                         ),
                       ),
                     ),

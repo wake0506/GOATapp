@@ -12,11 +12,15 @@ class TrainingStatusCard extends StatelessWidget {
     key: const Key('training-status-card'),
     padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
-      color: const Color(0xFF004D3A),
+      gradient: const LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: [Color(0xFF008C8C), Color(0xFF007777), Color(0xFF006363)],
+      ),
       borderRadius: BorderRadius.circular(20),
       boxShadow: const [
         BoxShadow(
-          color: Color(0x24004D3A),
+          color: Color(0x26008C8C),
           blurRadius: 18,
           offset: Offset(0, 8),
         ),

@@ -3292,14 +3292,18 @@ class _MainTabControllerState extends State<MainTabController>
             padding: const EdgeInsets.all(25),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF004D40), Color(0xFF00796B)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  Color(0xFF006363),
+                  Color(0xFF007777),
+                  Color(0xFF008C8C),
+                ],
               ),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF004D40).withOpacity(0.3),
+                  color: const Color(0xFF008C8C).withValues(alpha: 0.26),
                   blurRadius: 15,
                   offset: const Offset(0, 8),
                 ),

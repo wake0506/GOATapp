@@ -34,19 +34,21 @@ void main() {
     expect(find.text('训 练 记 录'), findsOneWidget);
     expect(find.byKey(const Key('training-status-card')), findsOneWidget);
     expect(find.byKey(const Key('training-quick-start-card')), findsOneWidget);
-    expect(find.byKey(const Key('training-load-card')), findsOneWidget);
+    expect(find.byKey(const Key('training-ai-insight-card')), findsOneWidget);
     expect(find.text('开始一次新训练'), findsOneWidget);
     expect(find.text('我的常用方案'), findsOneWidget);
     expect(find.text('PPL-推力日'), findsOneWidget);
-    expect(find.text('最近 7 天暂无足够训练数据'), findsOneWidget);
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -520));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(const Key('personal-best-card'), skipOffstage: false),
+      find.byKey(const Key('training-load-card'), skipOffstage: false),
       findsOneWidget,
     );
+    expect(find.text('最近 7 天暂无足够训练数据', skipOffstage: false), findsOneWidget);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -380));
+    await tester.pumpAndSettle();
     expect(
-      find.byKey(const Key('training-ai-insight-card'), skipOffstage: false),
+      find.byKey(const Key('personal-best-card'), skipOffstage: false),
       findsOneWidget,
     );
     expect(find.text('暂无记录'), findsNWidgets(3));

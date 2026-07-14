@@ -31,7 +31,7 @@ class _TrainingAiInsightCardState extends State<TrainingAiInsightCard> {
             padding: EdgeInsets.only(top: 2),
             child: Icon(
               Icons.auto_awesome_rounded,
-              color: Color(0xFF006B55),
+              color: Color(0xFF008C8C),
               size: 24,
             ),
           ),
@@ -43,7 +43,7 @@ class _TrainingAiInsightCardState extends State<TrainingAiInsightCard> {
                 const Text(
                   'DeepSeek 训练建议',
                   style: TextStyle(
-                    color: Color(0xFF005A45),
+                    color: Color(0xFF008C8C),
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                   ),

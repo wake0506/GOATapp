@@ -32,7 +32,7 @@ class TrainingLoadCard extends StatelessWidget {
               ),
               Icon(
                 Icons.info_outline_rounded,
-                color: Color(0xFF416F64),
+                color: Color(0xFF008C8C),
                 size: 21,
               ),
             ],

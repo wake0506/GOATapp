@@ -55,7 +55,7 @@ class MuscleLoadChartPainter extends CustomPainter {
         );
         final fillPaint = Paint()
           ..shader = const LinearGradient(
-            colors: [Color(0xFF005A45), Color(0xFF5D9788)],
+            colors: [Color(0xFF008C8C), Color(0xFF72B9B9)],
           ).createShader(fillRect.outerRect);
         canvas.drawRRect(fillRect, fillPaint);
       }

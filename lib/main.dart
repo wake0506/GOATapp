@@ -29,6 +29,7 @@ import 'features/voice_entry/voice_entry_sheet.dart';
 import 'features/tracking/weight_picker_sheet.dart';
 import 'features/training/exercise_time.dart';
 import 'features/training/training_page.dart';
+import 'features/home/home_page.dart';
 import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
 import 'repositories/water_tracking_repository.dart';
@@ -2473,86 +2474,79 @@ class _MainTabControllerState extends State<MainTabController>
     final consumed = allConsumedItems
         .where((i) => i.date == viewDateStr)
         .toList();
-    final exercise = allExerciseItems
-        .where((i) => i.date == viewDateStr)
-        .toList();
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFF4F5F7),
-        elevation: 0,
-        centerTitle: false,
-        title: Text(
-          isToday ? 'G O A T' : 'HISTORY',
-          style: const TextStyle(
-            fontWeight: FontWeight.w200,
-            letterSpacing: 4.0,
-            fontSize: 18,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(
-              Icons.auto_awesome,
-              color: GoatApp.marsGreen,
-              size: 24,
-            ),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatAssistantPage(
-                    userData:
-                        "性别:$gender, 生日:$birthYear-$birthMonth-$birthDay, 身高:${height.toInt()}cm, 体重:${_formatWeight(currentWeight)}",
-                  ),
-                ),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(
-              Icons.edit_note_rounded,
-              color: GoatApp.marsGreen,
-              size: 24,
-            ),
-            onPressed: () => _showFoodPicker(context, '加餐'),
-          ),
-          const SizedBox(width: 8),
-        ],
+    final currentDate = DateUtils.dateOnly(
+      DateTime.tryParse(viewDateStr) ?? DateTime.now(),
+    );
+    final previousWeight =
+        dailyWeight[_dateKey(currentDate.subtract(const Duration(days: 1)))];
+    return HomePage(
+      businessDate: viewDateStr,
+      isToday: isToday,
+      stats: stats,
+      targetKcal: targetKcal,
+      targetProtein: targetP,
+      targetCarbs: targetC,
+      targetFat: targetF,
+      waterMl: _waterTotalForDate(viewDateStr),
+      weight: dailyWeight[viewDateStr] ?? currentWeight,
+      previousWeight: previousWeight,
+      consumed: consumed,
+      aiContent: _currentAiTip,
+      isAiLoading: _isAiTipLoading,
+      showAiCard: aiDismissedDate != viewDateStr,
+      onEditTarget: _showTargetSettingsDialog,
+      onRequestAiAdvice: _fetchDailyAiTip,
+      onDismissAi: () {
+        setState(() => aiDismissedDate = viewDateStr);
+        _saveLocalPreferencesOnly();
+      },
+      onQuickAddWater: _quickAddHomeWater,
+      onOpenWater: _showWaterTrackingPage,
+      onOpenWeight: _showWeightPickerForDate,
+      onOpenMeal: (mealType) => _showMealDetailPopup(
+        mealType,
+        mealType,
+        _dashboardMealRecords(mealType, consumed),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0),
-        children: [
-          _buildMacronutrientsCard(stats, showEditSettings: true),
-          const SizedBox(height: 16),
-          if (aiDismissedDate != viewDateStr) ...[
-            GestureDetector(
-              onTap: _fetchDailyAiTip,
-              child: AIRecommendationCard(
-                isLoading: _isAiTipLoading,
-                content: _isAiTipLoading
-                    ? "GOAT AI 正在分析今日数据..."
-                    : _currentAiTip,
-                onClose: _isAiTipLoading
-                    ? null
-                    : () {
-                        setState(() => aiDismissedDate = viewDateStr);
-                        _saveLocalPreferencesOnly();
-                      },
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          _buildWaterWeightRow(
-            _waterTotalForDate(viewDateStr),
-            dailyWeight[viewDateStr] ?? 0.0,
+      onAddMeal: _showNutritionQuickAdd,
+      onVoiceMeal: (mealType) {
+        unawaited(
+          showVoiceEntrySheet(
+            context: context,
+            mealType: mealType,
+            speechService: _speechService,
+            nutritionService: _nutritionAiService,
+            repository: this,
           ),
-          const SizedBox(height: 16),
-          _buildDietGrid(consumed),
-          const SizedBox(height: 16),
-          _buildExerciseSection(exercise, stats.burn),
-          const SizedBox(height: 40),
-        ],
+        );
+      },
+      onOpenTraining: () => setState(() => _currentIndex = 2),
+      onAddExercise: _showExerciseAddDialog,
+    );
+  }
+
+  List<ConsumedRecord> _dashboardMealRecords(
+    String mealType,
+    Iterable<ConsumedRecord> consumed,
+  ) => consumed
+      .where((record) {
+        if (mealType == '加餐') {
+          return record.mealType != '早餐' &&
+              record.mealType != '午餐' &&
+              record.mealType != '晚餐';
+        }
+        return record.mealType == mealType;
+      })
+      .toList(growable: false);
+
+  Future<void> _quickAddHomeWater() async {
+    final now = DateTime.now();
+    await addWaterRecord(
+      WaterIntakeRecord(
+        id: 'water_${now.microsecondsSinceEpoch}',
+        date: viewDateStr,
+        recordedAt: now,
+        amountMl: 250,
       ),
     );
   }

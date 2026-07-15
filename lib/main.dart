@@ -330,13 +330,22 @@ class _MainTabControllerState extends State<MainTabController>
   Future<void> _initUserAndData() async {
     try {
       _storage = await LocalStorageService.create();
-      _featureFlags = FeatureFlagService(client: supabase, preferences: _storage!.prefs);
+      _featureFlags = FeatureFlagService(
+        client: supabase,
+        preferences: _storage!.prefs,
+      );
       _versionedSyncEnabled = _featureFlags!.isEnabled(
         'versioned_sync',
         localCapability: enableVersionedCloudSync,
       );
-      _cloudSyncService = CloudSyncService(supabase, versionedSyncEnabled: _versionedSyncEnabled);
-      _syncDiagnosticsService = SyncDiagnosticsService(client: supabase, preferences: _storage!.prefs);
+      _cloudSyncService = CloudSyncService(
+        supabase,
+        versionedSyncEnabled: _versionedSyncEnabled,
+      );
+      _syncDiagnosticsService = SyncDiagnosticsService(
+        client: supabase,
+        preferences: _storage!.prefs,
+      );
       await _storage!.migrateLegacyGuestData();
       final user = supabase.auth.currentUser;
       _activeUserId = user != null && !user.isAnonymous ? user.id : null;
@@ -366,25 +375,37 @@ class _MainTabControllerState extends State<MainTabController>
     if (flags == null) return;
     try {
       await flags.refresh();
-      final enabled = flags.isEnabled('versioned_sync', localCapability: enableVersionedCloudSync);
+      final enabled = flags.isEnabled(
+        'versioned_sync',
+        localCapability: enableVersionedCloudSync,
+      );
       if (enabled != _versionedSyncEnabled) {
         _versionedSyncEnabled = enabled;
-        _cloudSyncService = CloudSyncService(supabase, versionedSyncEnabled: enabled);
+        _cloudSyncService = CloudSyncService(
+          supabase,
+          versionedSyncEnabled: enabled,
+        );
       }
     } catch (_) {}
   }
 
-  void _reportSync({DateTime? lastSuccessAt, String? errorCode, bool force = false}) {
+  void _reportSync({
+    DateTime? lastSuccessAt,
+    String? errorCode,
+    bool force = false,
+  }) {
     final service = _syncDiagnosticsService;
     if (service == null) return;
-    unawaited(service.report(
-      syncEnabled: _versionedSyncEnabled,
-      pendingOperations: _syncQueue.operations.length,
-      lastSuccessAt: lastSuccessAt,
-      errorCode: errorCode,
-      errorAt: errorCode == null ? null : DateTime.now().toUtc(),
-      force: force,
-    ));
+    unawaited(
+      service.report(
+        syncEnabled: _versionedSyncEnabled,
+        pendingOperations: _syncQueue.operations.length,
+        lastSuccessAt: lastSuccessAt,
+        errorCode: errorCode,
+        errorAt: errorCode == null ? null : DateTime.now().toUtc(),
+        force: force,
+      ),
+    );
   }
 
   Future<void> _mergeGuestDataIfNeeded() async {
@@ -2138,15 +2159,25 @@ class _MainTabControllerState extends State<MainTabController>
         content: TextField(
           controller: controller,
           autocorrect: false,
-          decoration: const InputDecoration(labelText: 'Type DELETE MY ACCOUNT'),
+          decoration: const InputDecoration(
+            labelText: 'Type DELETE MY ACCOUNT',
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
-    final matches = accepted == true && controller.text == AccountDeletionService.confirmationPhrase;
+    final matches =
+        accepted == true &&
+        controller.text == AccountDeletionService.confirmationPhrase;
     controller.dispose();
     return matches;
   }
@@ -2196,8 +2227,12 @@ class _MainTabControllerState extends State<MainTabController>
       // 2. 调用后端特权 RPC 函数删库跑路
       final storage = _storage;
       if (storage == null) throw StateError('Local storage is unavailable');
-      await AccountDeletionService(client: supabase, storage: storage)
-          .deleteCurrentAccount(confirmation: AccountDeletionService.confirmationPhrase);
+      await AccountDeletionService(
+        client: supabase,
+        storage: storage,
+      ).deleteCurrentAccount(
+        confirmation: AccountDeletionService.confirmationPhrase,
+      );
       // 3. 退出当前登录状态并清空本地缓存
       _activeUserId = null;
       _activeNamespace = _storage?.namespaceForUser(null) ?? 'guest';

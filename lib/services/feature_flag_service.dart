@@ -21,7 +21,11 @@ class FeatureFlagService {
     return flags;
   }
 
-  bool isEnabled(String key, {required bool localCapability, bool defaultValue = false}) {
+  bool isEnabled(
+    String key, {
+    required bool localCapability,
+    bool defaultValue = false,
+  }) {
     if (!localCapability) return false;
     return cached()[key] ?? defaultValue;
   }
@@ -30,7 +34,10 @@ class FeatureFlagService {
     if (raw == null) return const {};
     try {
       final value = jsonDecode(raw);
-      if (value is Map) return value.map((key, value) => MapEntry(key.toString(), value == true));
+      if (value is Map)
+        return value.map(
+          (key, value) => MapEntry(key.toString(), value == true),
+        );
     } catch (_) {}
     return const {};
   }

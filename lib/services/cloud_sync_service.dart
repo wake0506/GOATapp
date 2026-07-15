@@ -11,7 +11,10 @@ import '../repositories/sync_repository.dart';
 
 const bool enableVersionedCloudSync = bool.fromEnvironment(
   'ENABLE_VERSIONED_SYNC',
-  defaultValue: bool.fromEnvironment('GOAT_ENABLE_VERSIONED_CLOUD_SYNC', defaultValue: false),
+  defaultValue: bool.fromEnvironment(
+    'GOAT_ENABLE_VERSIONED_CLOUD_SYNC',
+    defaultValue: false,
+  ),
 );
 
 class CloudSyncService implements SyncRepository {
@@ -19,7 +22,7 @@ class CloudSyncService implements SyncRepository {
   final bool versionedSyncEnabled;
 
   CloudSyncService(this.client, {bool? versionedSyncEnabled})
-      : versionedSyncEnabled = versionedSyncEnabled ?? enableVersionedCloudSync;
+    : versionedSyncEnabled = versionedSyncEnabled ?? enableVersionedCloudSync;
 
   @override
   Future<PendingCloudDeletes> syncSnapshot({

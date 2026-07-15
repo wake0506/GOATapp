@@ -38,6 +38,9 @@ import 'services/speech_recognition_service.dart';
 import 'services/nutrition_quick_access_service.dart';
 import 'services/sync_queue_service.dart';
 import 'services/sync_diagnostics.dart';
+import 'services/sync_diagnostics_service.dart';
+import 'services/feature_flag_service.dart';
+import 'services/account_deletion_service.dart';
 
 export 'models/consumed_record.dart';
 export 'models/daily_macro_stats.dart';
@@ -121,7 +124,13 @@ class _MainTabControllerState extends State<MainTabController>
     with WidgetsBindingObserver
     implements NutritionRepository, WaterTrackingRepository {
   final supabase = Supabase.instance.client;
-  late final CloudSyncService _cloudSyncService = CloudSyncService(supabase);
+  late CloudSyncService _cloudSyncService = CloudSyncService(
+    supabase,
+    versionedSyncEnabled: false,
+  );
+  FeatureFlagService? _featureFlags;
+  SyncDiagnosticsService? _syncDiagnosticsService;
+  bool _versionedSyncEnabled = false;
   final DeviceSpeechRecognitionService _speechService =
       DeviceSpeechRecognitionService();
   late final NutritionAiService _nutritionAiService =
@@ -321,6 +330,13 @@ class _MainTabControllerState extends State<MainTabController>
   Future<void> _initUserAndData() async {
     try {
       _storage = await LocalStorageService.create();
+      _featureFlags = FeatureFlagService(client: supabase, preferences: _storage!.prefs);
+      _versionedSyncEnabled = _featureFlags!.isEnabled(
+        'versioned_sync',
+        localCapability: enableVersionedCloudSync,
+      );
+      _cloudSyncService = CloudSyncService(supabase, versionedSyncEnabled: _versionedSyncEnabled);
+      _syncDiagnosticsService = SyncDiagnosticsService(client: supabase, preferences: _storage!.prefs);
       await _storage!.migrateLegacyGuestData();
       final user = supabase.auth.currentUser;
       _activeUserId = user != null && !user.isAnonymous ? user.id : null;
@@ -342,6 +358,33 @@ class _MainTabControllerState extends State<MainTabController>
 
     // 网络不可用时也必须允许用户进入 App，云端连接在后台完成。
     unawaited(_connectAndSyncCloud());
+    unawaited(_refreshFeatureFlags());
+  }
+
+  Future<void> _refreshFeatureFlags() async {
+    final flags = _featureFlags;
+    if (flags == null) return;
+    try {
+      await flags.refresh();
+      final enabled = flags.isEnabled('versioned_sync', localCapability: enableVersionedCloudSync);
+      if (enabled != _versionedSyncEnabled) {
+        _versionedSyncEnabled = enabled;
+        _cloudSyncService = CloudSyncService(supabase, versionedSyncEnabled: enabled);
+      }
+    } catch (_) {}
+  }
+
+  void _reportSync({DateTime? lastSuccessAt, String? errorCode, bool force = false}) {
+    final service = _syncDiagnosticsService;
+    if (service == null) return;
+    unawaited(service.report(
+      syncEnabled: _versionedSyncEnabled,
+      pendingOperations: _syncQueue.operations.length,
+      lastSuccessAt: lastSuccessAt,
+      errorCode: errorCode,
+      errorAt: errorCode == null ? null : DateTime.now().toUtc(),
+      force: force,
+    ));
   }
 
   Future<void> _mergeGuestDataIfNeeded() async {
@@ -409,6 +452,7 @@ class _MainTabControllerState extends State<MainTabController>
       _pendingCloudDeletes = _pendingCloudDeletes.without(processedDeletes);
       _syncQueue.markAllSucceeded();
       _syncQueue.advanceCursor(DateTime.now().toUtc());
+      _reportSync(lastSuccessAt: DateTime.now().toUtc());
       await _storage?.save(_activeNamespace, _snapshotFromState());
       if (_guestMergePending && _storage != null) {
         await _storage!.clearNamespace(_storage!.namespaceForUser(null));
@@ -421,12 +465,14 @@ class _MainTabControllerState extends State<MainTabController>
       }
       await _saveLocalPreferencesOnly();
       _cloudSyncPending = true;
+      _reportSync(errorCode: 'SYNC_FAILED');
       debugPrint('云端保存失败，保留本地待同步状态: $e');
     }
   }
 
   Future<void> _retryCloudSync() async {
     if (!_cloudSyncPending) return;
+    _reportSync(force: true);
     await _saveData();
   }
 
@@ -436,7 +482,7 @@ class _MainTabControllerState extends State<MainTabController>
     try {
       final cloudSnapshot = await _cloudSyncService.fetchSnapshot(
         user,
-        lastSyncedAt: enableVersionedCloudSync
+        lastSyncedAt: _versionedSyncEnabled
             ? _syncQueue.cursor.lastSyncedAt
             : null,
       );
@@ -2083,6 +2129,28 @@ class _MainTabControllerState extends State<MainTabController>
     _applySnapshot(_storage?.load(_activeNamespace) ?? AppSnapshot.empty());
   }
 
+  Future<bool> _confirmAccountDeletionPhrase() async {
+    final controller = TextEditingController();
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm account deletion'),
+        content: TextField(
+          controller: controller,
+          autocorrect: false,
+          decoration: const InputDecoration(labelText: 'Type DELETE MY ACCOUNT'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    final matches = accepted == true && controller.text == AccountDeletionService.confirmationPhrase;
+    controller.dispose();
+    return matches;
+  }
+
   // 🌟 新增功能：合规注销账号
   Future<void> _deleteAccount() async {
     // 1. 弹出二次确认极其危险的操作
@@ -2121,14 +2189,16 @@ class _MainTabControllerState extends State<MainTabController>
         false;
 
     if (!confirm) return;
+    await supabase.auth.reauthenticate();
+    if (!await _confirmAccountDeletionPhrase()) return;
 
     try {
       // 2. 调用后端特权 RPC 函数删库跑路
-      await supabase.rpc('delete_user');
+      final storage = _storage;
+      if (storage == null) throw StateError('Local storage is unavailable');
+      await AccountDeletionService(client: supabase, storage: storage)
+          .deleteCurrentAccount(confirmation: AccountDeletionService.confirmationPhrase);
       // 3. 退出当前登录状态并清空本地缓存
-      await supabase.auth.signOut();
-      if (_activeUserId != null)
-        await _storage?.clearNamespace(_activeNamespace);
       _activeUserId = null;
       _activeNamespace = _storage?.namespaceForUser(null) ?? 'guest';
       _applySnapshot(_storage?.load(_activeNamespace) ?? AppSnapshot.empty());

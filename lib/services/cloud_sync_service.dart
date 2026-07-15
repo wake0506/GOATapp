@@ -10,21 +10,23 @@ import '../models/pending_cloud_deletes.dart';
 import '../repositories/sync_repository.dart';
 
 const bool enableVersionedCloudSync = bool.fromEnvironment(
-  'GOAT_ENABLE_VERSIONED_CLOUD_SYNC',
-  defaultValue: false,
+  'ENABLE_VERSIONED_SYNC',
+  defaultValue: bool.fromEnvironment('GOAT_ENABLE_VERSIONED_CLOUD_SYNC', defaultValue: false),
 );
 
 class CloudSyncService implements SyncRepository {
   final SupabaseClient client;
+  final bool versionedSyncEnabled;
 
-  CloudSyncService(this.client);
+  CloudSyncService(this.client, {bool? versionedSyncEnabled})
+      : versionedSyncEnabled = versionedSyncEnabled ?? enableVersionedCloudSync;
 
   @override
   Future<PendingCloudDeletes> syncSnapshot({
     required User user,
     required AppSnapshot snapshot,
   }) async {
-    if (enableVersionedCloudSync) {
+    if (versionedSyncEnabled) {
       await _upsertTombstones(user, snapshot.pendingCloudDeletes);
     }
     await client.from('user_profiles').upsert({
@@ -130,7 +132,7 @@ class CloudSyncService implements SyncRepository {
           .inFilter('date', pendingDates);
     }
 
-    if (enableVersionedCloudSync) {
+    if (versionedSyncEnabled) {
       await _syncWaterRecords(user, snapshot);
       await _syncWeightRecords(user, snapshot);
     }
@@ -138,7 +140,7 @@ class CloudSyncService implements SyncRepository {
     // The compatibility path can still sync the phase-one tables before the
     // additive migration is deployed. Once enabled, all delete IDs are safe
     // to acknowledge because their tombstones were written first.
-    return enableVersionedCloudSync
+    return versionedSyncEnabled
         ? snapshot.pendingCloudDeletes
         : snapshot.pendingCloudDeletes.copyWith(waterRecordIds: const {});
   }
@@ -231,7 +233,7 @@ class CloudSyncService implements SyncRepository {
     User user, {
     DateTime? lastSyncedAt,
   }) async {
-    final useIncremental = enableVersionedCloudSync && lastSyncedAt != null;
+    final useIncremental = versionedSyncEnabled && lastSyncedAt != null;
     final profile = await client
         .from('user_profiles')
         .select()
@@ -269,7 +271,7 @@ class CloudSyncService implements SyncRepository {
     List<Map<String, dynamic>> bodyWeights = const [];
     List<Map<String, dynamic>> tombstones = const [];
     Set<String> tombstoneKeys = const {};
-    if (enableVersionedCloudSync) {
+    if (versionedSyncEnabled) {
       final waterQuery = client
           .from('water_intake_records')
           .select()

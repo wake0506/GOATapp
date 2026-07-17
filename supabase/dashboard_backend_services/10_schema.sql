@@ -311,7 +311,7 @@ as $$
 declare
   table_name text;
   column_name text;
-  expected_tables text[] := pg_catalog.array[
+  expected_tables text[] := array[
     'user_profiles', 'food_dictionary', 'diet_logs', 'exercise_logs',
     'daily_tracking', 'water_intake_records', 'body_weight_logs',
     'training_sessions', 'sync_tombstones', 'client_operations',

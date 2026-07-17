@@ -36,6 +36,78 @@ insert into public.app_feature_flags (key, enabled, config) values
   ('voice_entry', true, '{}'::jsonb)
 on conflict (key) do nothing;
 
+do $$
+declare
+  chat_rel oid;
+  user_id_attnum smallint;
+  auth_id_attnum smallint;
+  fk record;
+  had_user_id_fk boolean := false;
+  has_cascade_fk boolean := false;
+begin
+  chat_rel := pg_catalog.to_regclass('public.chat_history');
+  if chat_rel is null then
+    return;
+  end if;
+
+  select attribute_row.attnum into user_id_attnum
+  from pg_catalog.pg_attribute attribute_row
+  where attribute_row.attrelid = chat_rel
+    and attribute_row.attname = 'user_id'
+    and attribute_row.attnum > 0
+    and not attribute_row.attisdropped;
+  if user_id_attnum is null then
+    raise exception 'CHAT_HISTORY_USER_ID_MISSING';
+  end if;
+
+  if exists (
+    select 1 from public.chat_history chat_row
+    left join auth.users auth_user on auth_user.id = chat_row.user_id
+    where chat_row.user_id is not null and auth_user.id is null
+  ) then
+    raise exception 'CHAT_HISTORY_ORPHAN_USER_ID';
+  end if;
+
+  select attribute_row.attnum into auth_id_attnum
+  from pg_catalog.pg_attribute attribute_row
+  where attribute_row.attrelid = pg_catalog.to_regclass('auth.users')
+    and attribute_row.attname = 'id'
+    and attribute_row.attnum > 0
+    and not attribute_row.attisdropped;
+
+  for fk in
+    select constraint_row.conname, constraint_row.confdeltype
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.contype = 'f'
+      and constraint_row.conrelid = chat_rel
+      and constraint_row.confrelid = pg_catalog.to_regclass('auth.users')
+      and constraint_row.conkey = array[user_id_attnum]::smallint[]
+      and constraint_row.confkey = array[auth_id_attnum]::smallint[]
+  loop
+    had_user_id_fk := true;
+    if fk.confdeltype = 'c' then
+      has_cascade_fk := true;
+    else
+      execute pg_catalog.format('alter table public.chat_history drop constraint %I', fk.conname);
+    end if;
+  end loop;
+
+  if not has_cascade_fk then
+    if had_user_id_fk then
+      alter table public.chat_history
+        add constraint goat_chat_history_user_id_fkey
+        foreign key (user_id) references auth.users(id) on delete cascade;
+    else
+      alter table public.chat_history
+        add constraint goat_chat_history_user_id_fkey
+        foreign key (user_id) references auth.users(id) on delete cascade not valid;
+      alter table public.chat_history
+        validate constraint goat_chat_history_user_id_fkey;
+    end if;
+  end if;
+end;
+$$;
+
 alter table public.sync_diagnostics enable row level security;
 alter table public.app_feature_flags enable row level security;
 drop policy if exists goat_sync_diagnostics_select_own on public.sync_diagnostics;
@@ -199,6 +271,14 @@ $$;
 
 revoke all on function public.assert_account_deletion_ready() from public, anon, authenticated;
 grant execute on function public.assert_account_deletion_ready() to service_role;
-revoke all on function public.delete_user() from public, anon, authenticated;
+do $$
+begin
+  if pg_catalog.to_regprocedure('public.delete_user()') is not null then
+    execute 'revoke all on function public.delete_user() from public';
+    execute 'revoke all on function public.delete_user() from anon';
+    execute 'revoke all on function public.delete_user() from authenticated';
+  end if;
+end;
+$$;
 revoke all on function public.get_daily_summary(date), public.get_weekly_summary(date) from public, anon;
 grant execute on function public.get_daily_summary(date), public.get_weekly_summary(date) to authenticated;

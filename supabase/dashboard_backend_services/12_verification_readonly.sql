@@ -13,11 +13,8 @@ declare
   expected text[] := array[
     'user_profiles', 'food_dictionary', 'diet_logs', 'exercise_logs',
     'daily_tracking', 'water_intake_records', 'body_weight_logs',
-    'training_sessions', 'chat_history'
-  ];
-  user_tables text[] := array[
-    'food_dictionary', 'diet_logs', 'exercise_logs', 'daily_tracking',
-    'water_intake_records', 'body_weight_logs', 'training_sessions', 'chat_history'
+    'training_sessions', 'sync_tombstones', 'client_operations',
+    'ai_usage_daily', 'sync_diagnostics', 'chat_history'
   ];
   table_name text;
   rel_oid oid;
@@ -29,7 +26,6 @@ declare
   acl_has_public boolean;
   acl_has_anon boolean;
   acl_has_authenticated boolean;
-  acl_has_service boolean;
   expr text;
   with_expr text;
 begin
@@ -160,14 +156,25 @@ begin
       into acl_has_public, acl_has_anon from pg_catalog.pg_proc p where p.oid = fn_oid;
     insert into pg_temp.goat_backend_verification values ('assert_account_deletion_ready:security_definer', case when acl_has_public then 'PASS' else 'FAIL' end, 'prosecdef=' || acl_has_public::text);
     insert into pg_temp.goat_backend_verification values ('assert_account_deletion_ready:empty_search_path', case when acl_has_anon then 'PASS' else 'FAIL' end, 'search_path=' || acl_has_anon::text);
-    insert into pg_temp.goat_backend_verification values ('assert_account_deletion_ready:service_role_only', case when pg_catalog.has_function_privilege('service_role', fn_oid, 'EXECUTE') and not pg_catalog.has_function_privilege('anon', fn_oid, 'EXECUTE') and not pg_catalog.has_function_privilege('authenticated', fn_oid, 'EXECUTE') then 'PASS' else 'FAIL' end, 'service_role only');
+    select exists (
+      select 1 from pg_catalog.aclexplode(pg_catalog.coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))) acl_row
+      where acl_row.grantee = 0 and acl_row.privilege_type = 'EXECUTE'
+    ) into acl_has_public
+    from pg_catalog.pg_proc p where p.oid = fn_oid;
+    insert into pg_temp.goat_backend_verification values ('assert_account_deletion_ready:public_no_execute', case when not acl_has_public then 'PASS' else 'FAIL' end, 'PUBLIC EXECUTE ACL');
+    insert into pg_temp.goat_backend_verification values ('assert_account_deletion_ready:service_role_only', case when pg_catalog.has_function_privilege('service_role', fn_oid, 'EXECUTE') and not acl_has_public and not pg_catalog.has_function_privilege('anon', fn_oid, 'EXECUTE') and not pg_catalog.has_function_privilege('authenticated', fn_oid, 'EXECUTE') then 'PASS' else 'FAIL' end, 'service_role only');
   end if;
 
   fn_oid := pg_catalog.to_regprocedure('public.delete_user()');
   if fn_oid is null then
     insert into pg_temp.goat_backend_verification values ('legacy_delete_user', 'PASS', 'function is absent');
   else
-    insert into pg_temp.goat_backend_verification values ('legacy_delete_user', case when not pg_catalog.has_function_privilege('anon', fn_oid, 'EXECUTE') and not pg_catalog.has_function_privilege('authenticated', fn_oid, 'EXECUTE') then 'PASS' else 'FAIL' end, 'client roles cannot execute');
+    select exists (
+      select 1 from pg_catalog.aclexplode(pg_catalog.coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))) acl_row
+      where acl_row.grantee = 0 and acl_row.privilege_type = 'EXECUTE'
+    ) into acl_has_public
+    from pg_catalog.pg_proc p where p.oid = fn_oid;
+    insert into pg_temp.goat_backend_verification values ('legacy_delete_user', case when not acl_has_public and not pg_catalog.has_function_privilege('anon', fn_oid, 'EXECUTE') and not pg_catalog.has_function_privilege('authenticated', fn_oid, 'EXECUTE') then 'PASS' else 'FAIL' end, 'PUBLIC, anon, and authenticated cannot execute');
   end if;
 
   -- Expected user tables, baseline rows, orphan rows, and FK cascade behavior.
@@ -198,11 +205,29 @@ begin
     end if;
   end loop;
 
-  -- New-table update triggers and initialized flags.
-  insert into pg_temp.goat_backend_verification values ('updated_at_triggers', case when (
-    select count(*) from pg_catalog.pg_trigger t join pg_catalog.pg_class c on c.oid = t.tgrelid join pg_catalog.pg_namespace n on n.oid = c.relnamespace join pg_catalog.pg_proc p on p.oid = t.tgfoid
-    where n.nspname = 'public' and c.relname in ('sync_diagnostics', 'app_feature_flags') and not t.tgisinternal and p.proname = 'goat_set_updated_at'
-  ) >= 2 then 'PASS' else 'FAIL' end, 'goat_set_updated_at trigger count');
+  -- Each managed trigger is verified separately, including function schema.
+  foreach table_name in array array['sync_diagnostics', 'app_feature_flags'] loop
+    rel_oid := pg_catalog.to_regclass(pg_catalog.format('public.%I', table_name));
+    if rel_oid is null then
+      insert into pg_temp.goat_backend_verification values ('trigger:' || table_name || '_updated_at', 'FAIL', 'table is missing');
+    else
+      insert into pg_temp.goat_backend_verification values (
+        'trigger:' || table_name || '_updated_at',
+        case when exists (
+          select 1
+          from pg_catalog.pg_trigger trigger_row
+          join pg_catalog.pg_proc function_row on function_row.oid = trigger_row.tgfoid
+          join pg_catalog.pg_namespace function_schema on function_schema.oid = function_row.pronamespace
+          where trigger_row.tgrelid = rel_oid
+            and trigger_row.tgname = table_name || '_updated_at'
+            and not trigger_row.tgisinternal
+            and function_schema.nspname = 'public'
+            and function_row.proname = 'goat_set_updated_at'
+        ) then 'PASS' else 'FAIL' end,
+        'expected public.goat_set_updated_at() trigger'
+      );
+    end if;
+  end loop;
   if pg_catalog.to_regclass('public.app_feature_flags') is not null then
     execute 'select count(*) from public.app_feature_flags where key in (''daily_summary'',''weekly_summary'',''data_export'',''account_deletion'')' into row_count;
     insert into pg_temp.goat_backend_verification values ('feature_flags:initialized', case when row_count = 4 then 'PASS' else 'FAIL' end, row_count::text || ' initialized flags');

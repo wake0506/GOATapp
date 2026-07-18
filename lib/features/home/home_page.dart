@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/daily_macro_stats.dart';
 import '../../models/consumed_record.dart';
+import '../../widgets/goat_page_header.dart';
 import 'models/home_dashboard_view_model.dart';
 import 'widgets/home_ai_card.dart';
 import 'widgets/home_exercise_card.dart';
@@ -84,15 +85,7 @@ class HomePage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: const Color(0xFFF4F5F7),
         elevation: 0,
-        title: Text(
-          isToday ? 'G O A T' : 'HISTORY',
-          style: const TextStyle(
-            color: Color(0xFF145C4B),
-            fontWeight: FontWeight.w600,
-            letterSpacing: 3.2,
-            fontSize: 22,
-          ),
-        ),
+        title: GoatPageHeader(title: isToday ? 'G O A T' : 'HISTORY'),
         actions: [
           IconButton(
             tooltip: '编辑今日目标',
@@ -102,39 +95,71 @@ class HomePage extends StatelessWidget {
           const SizedBox(width: 8),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-        children: [
-          HomeHeroCard(viewModel: viewModel, onEditTarget: onEditTarget),
-          const SizedBox(height: 14),
-          if (showAiCard) ...[
-            HomeAiCard(
-              content: aiContent,
-              isLoading: isAiLoading,
-              onRefresh: onRequestAiAdvice,
-              onClose: onDismissAi,
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: KeyedSubtree(
+              key: const Key('home-first-viewport-section'),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    HomeHeroCard(
+                      viewModel: viewModel,
+                      onEditTarget: onEditTarget,
+                    ),
+                    const SizedBox(height: 12),
+                    if (showAiCard) ...[
+                      HomeAiCard(
+                        content: aiContent,
+                        isLoading: isAiLoading,
+                        onRefresh: onRequestAiAdvice,
+                        onClose: onDismissAi,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    HomeMetricsRow(
+                      viewModel: viewModel,
+                      onOpenWater: onOpenWater,
+                      onQuickAddWater: onQuickAddWater,
+                      onOpenWeight: onOpenWeight,
+                    ),
+                    const SizedBox(height: 12),
+                    HomeMealsGrid(
+                      key: const Key('home-meals-first-row'),
+                      meals: viewModel.meals.take(2).toList(growable: false),
+                      onOpenMeal: onOpenMeal,
+                      onAddMeal: onAddMeal,
+                      onVoiceMeal: onVoiceMeal,
+                    ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(height: 14),
-          ],
-          HomeMetricsRow(
-            viewModel: viewModel,
-            onOpenWater: onOpenWater,
-            onQuickAddWater: onQuickAddWater,
-            onOpenWeight: onOpenWeight,
           ),
-          const SizedBox(height: 14),
-          HomeMealsGrid(
-            meals: viewModel.meals,
-            onOpenMeal: onOpenMeal,
-            onAddMeal: onAddMeal,
-            onVoiceMeal: onVoiceMeal,
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: HomeMealsGrid(
+                key: const Key('home-meals-second-row'),
+                meals: viewModel.meals.skip(2).toList(growable: false),
+                onOpenMeal: onOpenMeal,
+                onAddMeal: onAddMeal,
+                onVoiceMeal: onVoiceMeal,
+              ),
+            ),
           ),
-          const SizedBox(height: 14),
-          HomeExerciseCard(
-            totalBurn: stats.burn,
-            hasExercise: stats.burn > 0,
-            onOpenTraining: onOpenTraining,
-            onAddExercise: onAddExercise,
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            sliver: SliverToBoxAdapter(
+              child: HomeExerciseCard(
+                totalBurn: stats.burn,
+                hasExercise: stats.burn > 0,
+                onOpenTraining: onOpenTraining,
+                onAddExercise: onAddExercise,
+              ),
+            ),
           ),
         ],
       ),

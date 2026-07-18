@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../models/training.dart';
+import 'domain/active_training_session.dart';
 import 'models/training_page_view_model.dart';
 import 'widgets/personal_best_card.dart';
 import 'widgets/training_ai_insight_card.dart';
+import 'widgets/active_training_session_card.dart';
 import 'widgets/training_load_card.dart';
 import 'widgets/training_page_header.dart';
 import 'widgets/training_quick_start_card.dart';
@@ -19,6 +21,8 @@ class TrainingPage extends StatelessWidget {
     required this.onUseFullBodyTemplate,
     required this.onViewHistory,
     required this.onManageTemplates,
+    this.activeSession,
+    this.onResumeTraining,
   });
 
   final List<TrainingSession> sessions;
@@ -28,6 +32,8 @@ class TrainingPage extends StatelessWidget {
   final VoidCallback onUseFullBodyTemplate;
   final VoidCallback onViewHistory;
   final VoidCallback onManageTemplates;
+  final ActiveTrainingSession? activeSession;
+  final VoidCallback? onResumeTraining;
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +50,13 @@ class TrainingPage extends StatelessWidget {
             const TrainingPageHeader(),
             const SizedBox(height: 18),
             TrainingStatusCard(status: viewModel.status),
+            if (activeSession != null && onResumeTraining != null) ...[
+              const SizedBox(height: 14),
+              ActiveTrainingSessionCard(
+                session: activeSession!,
+                onTap: onResumeTraining!,
+              ),
+            ],
             const SizedBox(height: 14),
             const TrainingAiInsightCard(),
             const SizedBox(height: 14),

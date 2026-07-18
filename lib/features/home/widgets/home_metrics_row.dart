@@ -32,154 +32,183 @@ class HomeMetricsRow extends StatelessWidget {
           ),
         ],
       ),
-      child: IntrinsicHeight(
-        child: Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) => Stack(
           children: [
-            Expanded(
-              child: InkWell(
-                onTap: onOpenWater,
-                borderRadius: const BorderRadius.horizontal(
-                  left: Radius.circular(20),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 17, 12, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: onOpenWater,
+                    borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 12, 13),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.water_drop_outlined,
-                            size: 17,
-                            color: Color(0xFF2784C7),
-                          ),
-                          SizedBox(width: 6),
-                          Text(
-                            '饮水记录',
-                            style: TextStyle(
-                              color: Color(0xFF3B4645),
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 13),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text.rich(
-                              TextSpan(
-                                text: viewModel.waterMl.toString(),
-                                style: const TextStyle(
-                                  color: Color(0xFF1F2725),
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.water_drop_outlined,
+                                size: 17,
+                                color: Color(0xFF2784C7),
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                '饮水记录',
+                                style: TextStyle(
+                                  color: Color(0xFF3B4645),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                                children: [
-                                  TextSpan(
-                                    text: ' / ${viewModel.waterGoalMl} ml',
-                                    style: const TextStyle(
-                                      color: Color(0xFF69706F),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text.rich(
+                                    TextSpan(
+                                      text: viewModel.waterMl.toString(),
+                                      style: const TextStyle(
+                                        color: Color(0xFF1F2725),
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      children: [
+                                        TextSpan(
+                                          text:
+                                              ' / ${viewModel.waterGoalMl} ml',
+                                          style: const TextStyle(
+                                            color: Color(0xFF69706F),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    maxLines: 1,
+                                    strutStyle: const StrutStyle(
+                                      fontSize: 22,
+                                      height: 1.15,
+                                      forceStrutHeight: true,
                                     ),
                                   ),
-                                ],
+                                ),
+                              ),
+                              _QuickWaterButton(onTap: onQuickAddWater),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '达成 ${(viewModel.waterProgress * 100).round()}%',
+                            style: const TextStyle(
+                              color: Color(0xFF737B7A),
+                              fontSize: 11,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 5,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: LinearProgressIndicator(
+                                value: viewModel.waterProgress,
+                                color: const Color(0xFF008C8C),
+                                backgroundColor: const Color(0xFFE8ECEC),
                               ),
                             ),
                           ),
-                          _QuickWaterButton(onTap: onQuickAddWater),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '达成 ${(viewModel.waterProgress * 100).round()}%',
-                        style: const TextStyle(
-                          color: Color(0xFF737B7A),
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: LinearProgressIndicator(
-                          value: viewModel.waterProgress,
-                          minHeight: 5,
-                          color: const Color(0xFF008C8C),
-                          backgroundColor: const Color(0xFFE8ECEC),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
-            const VerticalDivider(
-              width: 1,
-              thickness: 1,
-              color: Color(0xFFEDF0F0),
-            ),
-            Expanded(
-              child: InkWell(
-                onTap: onOpenWeight,
-                borderRadius: const BorderRadius.horizontal(
-                  right: Radius.circular(20),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 17, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
+                Expanded(
+                  child: InkWell(
+                    onTap: onOpenWeight,
+                    borderRadius: const BorderRadius.horizontal(
+                      right: Radius.circular(20),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 13),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.monitor_weight_outlined,
-                            size: 17,
-                            color: Color(0xFFB27A26),
-                          ),
-                          SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '体重记录',
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Color(0xFF3B4645),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.monitor_weight_outlined,
+                                size: 17,
+                                color: Color(0xFFB27A26),
                               ),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  '体重记录',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Color(0xFF3B4645),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Text.rich(
+                            TextSpan(
+                              text: viewModel.weight > 0
+                                  ? viewModel.weight.toStringAsFixed(2)
+                                  : '--',
+                              style: const TextStyle(
+                                color: Color(0xFF1F2725),
+                                fontSize: 25,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              children: const [
+                                TextSpan(
+                                  text: ' kg',
+                                  style: TextStyle(
+                                    color: Color(0xFF69706F),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            strutStyle: const StrutStyle(
+                              fontSize: 25,
+                              height: 1.15,
+                              forceStrutHeight: true,
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          _WeightTrend(delta: trend),
                         ],
                       ),
-                      const SizedBox(height: 13),
-                      Text.rich(
-                        TextSpan(
-                          text: viewModel.weight > 0
-                              ? viewModel.weight.toStringAsFixed(2)
-                              : '--',
-                          style: const TextStyle(
-                            color: Color(0xFF1F2725),
-                            fontSize: 25,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          children: const [
-                            TextSpan(
-                              text: ' kg',
-                              style: TextStyle(
-                                color: Color(0xFF69706F),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _WeightTrend(delta: trend),
-                    ],
+                    ),
                   ),
                 ),
+              ],
+            ),
+            Positioned(
+              left: constraints.maxWidth / 2,
+              top: 14,
+              bottom: 13,
+              child: const ColoredBox(
+                color: Color(0xFFEDF0F0),
+                child: SizedBox(width: 1),
               ),
             ),
           ],

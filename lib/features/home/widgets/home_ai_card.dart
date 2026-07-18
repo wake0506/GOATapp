@@ -28,7 +28,7 @@ class _HomeAiCardState extends State<HomeAiCard> {
         : widget.content.trim();
     return Container(
       key: const Key('home-ai-card'),
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 16),
+      padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
       decoration: BoxDecoration(
         color: const Color(0xFFEAF6F2),
         border: Border.all(color: const Color(0xFFCFE9E0)),
@@ -58,7 +58,7 @@ class _HomeAiCardState extends State<HomeAiCard> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 if (widget.isLoading)
                   const SizedBox(
                     height: 20,
@@ -79,7 +79,7 @@ class _HomeAiCardState extends State<HomeAiCard> {
                       height: 1.45,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   GestureDetector(
                     onTap: widget.content.trim().isEmpty
                         ? widget.onRefresh

@@ -67,6 +67,25 @@ class TrainingSessionEngine {
     );
   }
 
+  Future<ActiveTrainingSession> updateSet({
+    required String setId,
+    double? weight,
+    int? reps,
+    int? rir,
+    bool? reachedFailure,
+  }) async {
+    final active = await _requiredActive();
+    final set = _findSet(active.draft, setId);
+    if (set == null) throw StateError('Set $setId was not found in the draft.');
+    if (weight != null) set.weight = weight < 0 ? 0 : weight;
+    if (reps != null) set.reps = reps < 0 ? 0 : reps;
+    if (rir != null) set.rir = rir.clamp(0, 3);
+    if (reachedFailure != null) set.reachedFailure = reachedFailure;
+    final next = active.copyWith(updatedAt: _clock());
+    await _repository.saveActiveSession(next);
+    return next;
+  }
+
   Future<ActiveTrainingSession> startRest({
     required String setId,
     required int durationSeconds,
@@ -133,11 +152,20 @@ class TrainingSessionEngine {
       ..status = TrainingExerciseStatus.planned
       ..orderIndex = active.draft.exercises.length;
     active.draft.exercises.add(replacement);
-    return _transitionFrom(active, TrainingSessionEvent.replaceExercise);
+    return _transitionFrom(
+      active,
+      TrainingSessionEvent.replaceExercise,
+      currentExerciseId: replacement.exerciseId,
+      clearCurrentSetId: true,
+    );
   }
 
   Future<TrainingSession> finishSession() async {
     final active = await _requiredActive();
+    for (final exercise in active.draft.exercises) {
+      exercise.sets.removeWhere((set) => set.completedAt == null);
+    }
+    active.draft.exercises.removeWhere((exercise) => exercise.sets.isEmpty);
     final finished = await _transitionFrom(
       active,
       TrainingSessionEvent.finishSession,

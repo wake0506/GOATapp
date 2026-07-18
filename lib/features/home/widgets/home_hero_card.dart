@@ -17,7 +17,7 @@ class HomeHeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       key: const Key('home-hero-card'),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -84,9 +84,9 @@ class HomeHeroCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           const Divider(height: 1, color: Color(0xFFECF0F0)),
-          const SizedBox(height: 17),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(

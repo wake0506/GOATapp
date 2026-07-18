@@ -74,13 +74,14 @@ class TrainingSessionStateMachine {
         TrainingSessionState.setCompleted,
         TrainingSessionEvent.nextSet,
       ) => TrainingSessionState.readyForNextSet,
+      (TrainingSessionState.activeSet, TrainingSessionEvent.replaceExercise) ||
+      (
+        TrainingSessionState.setCompleted,
+        TrainingSessionEvent.replaceExercise,
+      ) => TrainingSessionState.readyForNextSet,
       (TrainingSessionState.preparing, TrainingSessionEvent.replaceExercise) ||
       (
         TrainingSessionState.readyForNextSet,
-        TrainingSessionEvent.replaceExercise,
-      ) ||
-      (
-        TrainingSessionState.setCompleted,
         TrainingSessionEvent.replaceExercise,
       ) => state,
       (_, TrainingSessionEvent.pause) when _canPause(state) =>
@@ -119,6 +120,7 @@ class TrainingSessionStateMachine {
 
   static bool _canFinish(TrainingSessionState state) => switch (state) {
     TrainingSessionState.preparing ||
+    TrainingSessionState.activeSet ||
     TrainingSessionState.setCompleted ||
     TrainingSessionState.resting ||
     TrainingSessionState.readyForNextSet ||

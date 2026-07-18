@@ -4,6 +4,7 @@ import 'package:goat_app/features/home/home_page.dart';
 import 'package:goat_app/features/home/widgets/macro_half_ring.dart';
 import 'package:goat_app/models/consumed_record.dart';
 import 'package:goat_app/models/daily_macro_stats.dart';
+import 'package:goat_app/widgets/goat_page_header.dart';
 
 void main() {
   Widget buildHome({
@@ -11,6 +12,7 @@ void main() {
     double targetKcal = 2000,
     double weight = 70.25,
     double? previousWeight = 70.45,
+    int waterMl = 1200,
     List<ConsumedRecord> consumed = const [],
     VoidCallback? onEditTarget,
     VoidCallback? onQuickWater,
@@ -31,7 +33,7 @@ void main() {
         targetProtein: 150,
         targetCarbs: 250,
         targetFat: 60,
-        waterMl: 1200,
+        waterMl: waterMl,
         weight: weight,
         previousWeight: previousWeight,
         consumed: consumed,
@@ -67,6 +69,74 @@ void main() {
       expect(find.text('FAT'), findsOneWidget);
     },
   );
+
+  testWidgets('home uses the shared GOAT page header typography', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildHome());
+
+    final header = tester.widget<GoatPageHeader>(find.byType(GoatPageHeader));
+    expect(header.title, 'G O A T');
+    expect(GoatHeaderTypography.pageTitle.letterSpacing, 4);
+  });
+
+  testWidgets('water card has a stable layout for every water state', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final viewport in const [Size(320, 640), Size(360, 800)]) {
+      await tester.binding.setSurfaceSize(viewport);
+      for (final waterMl in [0, 250, 2000]) {
+        await tester.pumpWidget(buildHome(waterMl: waterMl));
+        await tester.pumpAndSettle();
+
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('home-metrics-row')),
+          160,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(find.byKey(const Key('home-metrics-row')), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is RichText &&
+                widget.text.toPlainText().contains('$waterMl / 2000 ml'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('+250ml'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+    }
+  });
+
+  testWidgets('responsive viewports keep the second meal row scrollable', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final viewport in const [
+      Size(360, 800),
+      Size(390, 844),
+      Size(412, 915),
+    ]) {
+      await tester.binding.setSurfaceSize(viewport);
+      await tester.pumpWidget(buildHome(waterMl: 0));
+      await tester.pumpAndSettle();
+
+      final firstViewport = tester.getRect(
+        find.byKey(const Key('home-first-viewport-section')),
+      );
+      expect(firstViewport.bottom, greaterThan(0));
+      final secondRow = find.byKey(const Key('home-meals-second-row'));
+      await tester.scrollUntilVisible(
+        secondRow,
+        160,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.byKey(const Key('home-meals-second-row')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    }
+  });
 
   testWidgets('zero goal remains safe and target editor stays reachable', (
     tester,

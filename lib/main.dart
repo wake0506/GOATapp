@@ -29,10 +29,16 @@ import 'features/voice_entry/voice_entry_sheet.dart';
 import 'features/tracking/weight_picker_sheet.dart';
 import 'features/training/exercise_time.dart';
 import 'features/training/training_page.dart';
+import 'features/training/domain/active_training_session.dart';
+import 'features/training/domain/training_session_state.dart';
+import 'features/training/pages/active_training_page.dart';
+import 'features/training/services/training_session_engine.dart';
 import 'features/home/home_page.dart';
+import 'widgets/goat_page_header.dart';
 import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
 import 'repositories/water_tracking_repository.dart';
+import 'repositories/local_training_repository.dart';
 import 'services/cloud_sync_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/nutrition_ai_service.dart';
@@ -200,6 +206,7 @@ class _MainTabControllerState extends State<MainTabController>
   List<ConsumedRecord> allConsumedItems = [];
   List<ExerciseRecord> allExerciseItems = [];
   List<TrainingSession> allTrainingSessions = [];
+  ActiveTrainingSession? _activeTrainingSession;
   List<WaterIntakeRecord> waterIntakeRecords = [];
   Map<String, double> dailyWeight = {};
   List<String> searchHistory = [];
@@ -497,6 +504,7 @@ class _MainTabControllerState extends State<MainTabController>
     consumed: List.unmodifiable(allConsumedItems),
     exercises: List.unmodifiable(allExerciseItems),
     training: List.unmodifiable(allTrainingSessions),
+    activeTrainingSession: _activeTrainingSession,
     waterRecords: List.unmodifiable(waterIntakeRecords),
     water: Map.unmodifiable(waterTotals(waterIntakeRecords)),
     weight: Map.unmodifiable(dailyWeight),
@@ -525,6 +533,7 @@ class _MainTabControllerState extends State<MainTabController>
       allConsumedItems = [...snapshot.consumed];
       allExerciseItems = [...snapshot.exercises];
       allTrainingSessions = [...snapshot.training];
+      _activeTrainingSession = snapshot.activeTrainingSession;
       waterIntakeRecords = [...snapshot.waterRecords];
       dailyWeight = {...snapshot.weight};
       _pendingCloudDeletes = snapshot.pendingCloudDeletes;
@@ -788,14 +797,118 @@ class _MainTabControllerState extends State<MainTabController>
     return TrainingPage(
       sessions: allTrainingSessions,
       businessDate: viewDateStr,
-      onStartTraining: () => _showAddTrainingSessionSheet(viewDateStr),
+      activeSession: _activeTrainingSession,
+      onResumeTraining: _activeTrainingSession == null
+          ? null
+          : _openActiveTraining,
+      onStartTraining: () =>
+          _startFastTraining(name: '自主训练', exerciseName: '杠铃平板卧推'),
       onUsePplTemplate: () =>
-          _showAddTrainingSessionSheet(viewDateStr, initialName: 'PPL-推力日'),
+          _startFastTraining(name: 'PPL-推力日', exerciseName: '杠铃平板卧推'),
       onUseFullBodyTemplate: () =>
-          _showAddTrainingSessionSheet(viewDateStr, initialName: '全身循环燃脂'),
+          _startFastTraining(name: '全身循环燃脂', exerciseName: '杠铃深蹲'),
       onViewHistory: _showTrainingHistorySheet,
       onManageTemplates: () =>
           _showAddTrainingSessionSheet(viewDateStr, initialName: '自定义训练'),
+    );
+  }
+
+  LocalTrainingRepository? _localTrainingRepository() {
+    final storage = _storage;
+    if (storage == null) return null;
+    return LocalTrainingRepository(
+      storage: storage,
+      namespace: _activeNamespace,
+    );
+  }
+
+  Future<void> _startFastTraining({
+    required String name,
+    required String exerciseName,
+  }) async {
+    if (_activeTrainingSession != null) {
+      _openActiveTraining();
+      return;
+    }
+    final repository = _localTrainingRepository();
+    if (repository == null) return;
+    ExerciseDefinition? definition;
+    for (final exercise in exerciseCatalog) {
+      if (exercise.name == exerciseName) {
+        definition = exercise;
+        break;
+      }
+    }
+    final selectedDefinition = definition;
+    if (selectedDefinition == null) return;
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final draft = TrainingSession(
+      id: timestamp,
+      name: name,
+      date: viewDateStr,
+      exercises: [
+        TrainingExercise(
+          exerciseId: selectedDefinition.id,
+          exerciseName: selectedDefinition.name,
+          bodyPart: selectedDefinition.bodyPart,
+          orderIndex: 0,
+          sets: List.generate(
+            4,
+            (index) => SetRecord(
+              id: '$timestamp-${selectedDefinition.id}-${index + 1}',
+              setType: TrainingSetType.working,
+            ),
+          ),
+        ),
+      ],
+    );
+    try {
+      final active = await TrainingSessionEngine(
+        repository: repository,
+      ).startSession(activeSessionId: 'active-$timestamp', draft: draft);
+      if (!mounted) return;
+      setState(() => _activeTrainingSession = active);
+      _openActiveTraining();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('训练暂未开始，请重试')));
+    }
+  }
+
+  void _openActiveTraining() {
+    final active = _activeTrainingSession;
+    final repository = _localTrainingRepository();
+    if (active == null || repository == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ActiveTrainingPage(
+          initialSession: active,
+          engine: TrainingSessionEngine(repository: repository),
+          repository: repository,
+          catalog: exerciseCatalog,
+          onSessionChanged: (session) {
+            if (mounted) setState(() => _activeTrainingSession = session);
+          },
+          onFinished: (session) async {
+            final index = allTrainingSessions.indexWhere(
+              (existing) => existing.id == session.id,
+            );
+            if (mounted) {
+              setState(() {
+                if (index == -1) {
+                  allTrainingSessions.add(session);
+                } else {
+                  allTrainingSessions[index] = session;
+                }
+                _activeTrainingSession = null;
+              });
+            }
+            await _saveData();
+          },
+        ),
+      ),
     );
   }
 
@@ -3270,14 +3383,7 @@ class _MainTabControllerState extends State<MainTabController>
       appBar: AppBar(
         backgroundColor: const Color(0xFFF4F5F7),
         elevation: 0,
-        title: const Text(
-          '个 人 定 制 计 划',
-          style: TextStyle(
-            fontWeight: FontWeight.w200,
-            letterSpacing: 4.0,
-            fontSize: 18,
-          ),
-        ),
+        title: const GoatPageHeader(title: '个 人 定 制 计 划'),
       ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),

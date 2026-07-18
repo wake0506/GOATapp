@@ -17,26 +17,38 @@ class HomeMealsGrid extends StatelessWidget {
   final ValueChanged<String> onVoiceMeal;
 
   @override
-  Widget build(BuildContext context) => GridView.builder(
-    key: const Key('home-meals-grid'),
-    shrinkWrap: true,
-    physics: const NeverScrollableScrollPhysics(),
-    itemCount: meals.length,
-    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-      crossAxisCount: 2,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 1.18,
-    ),
-    itemBuilder: (context, index) {
-      final meal = meals[index];
-      return _HomeMealCard(
-        meal: meal,
-        onOpen: () => onOpenMeal(meal.mealType),
-        onAdd: () => onAddMeal(meal.mealType),
-        onVoice: () => onVoiceMeal(meal.mealType),
+  Widget build(BuildContext context) {
+    if (meals.length == 2) {
+      return Row(
+        children: [
+          Expanded(child: _mealCard(meals[0])),
+          const SizedBox(width: 12),
+          Expanded(child: _mealCard(meals[1])),
+        ],
       );
-    },
+    }
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: meals.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 1.28,
+      ),
+      itemBuilder: (context, index) => _mealCard(meals[index]),
+    );
+  }
+
+  Widget _mealCard(HomeMealSummary meal) => AspectRatio(
+    aspectRatio: 1.28,
+    child: _HomeMealCard(
+      meal: meal,
+      onOpen: () => onOpenMeal(meal.mealType),
+      onAdd: () => onAddMeal(meal.mealType),
+      onVoice: () => onVoiceMeal(meal.mealType),
+    ),
   );
 }
 

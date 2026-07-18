@@ -1,6 +1,7 @@
 import 'consumed_record.dart';
 import 'exercise_record.dart';
 import 'food_item.dart';
+import '../features/training/domain/active_training_session.dart';
 import 'json_value.dart';
 import 'pending_cloud_deletes.dart';
 import 'sync_cursor.dart';
@@ -26,6 +27,7 @@ class AppSnapshot {
   final List<ConsumedRecord> consumed;
   final List<ExerciseRecord> exercises;
   final List<TrainingSession> training;
+  final ActiveTrainingSession? activeTrainingSession;
   final List<WaterIntakeRecord> waterRecords;
   final Map<String, int> water;
   final Map<String, double> weight;
@@ -51,6 +53,7 @@ class AppSnapshot {
     required this.consumed,
     required this.exercises,
     required this.training,
+    this.activeTrainingSession,
     required this.waterRecords,
     required this.water,
     required this.weight,
@@ -90,6 +93,7 @@ class AppSnapshot {
       consumed.isNotEmpty ||
       exercises.isNotEmpty ||
       training.isNotEmpty ||
+      activeTrainingSession != null ||
       waterRecords.isNotEmpty ||
       water.isNotEmpty ||
       weight.isNotEmpty ||
@@ -114,6 +118,7 @@ class AppSnapshot {
     'consumed': consumed.map((e) => e.toJson()).toList(),
     'exercises': exercises.map((e) => e.toJson()).toList(),
     'training': training.map((e) => e.toJson()).toList(),
+    'activeTrainingSession': activeTrainingSession?.toJson(),
     'waterRecords': waterRecords.map((e) => e.toJson()).toList(),
     'water': water,
     'weight': weight,
@@ -158,6 +163,9 @@ class AppSnapshot {
       training: _objects(
         json['training'],
       ).map(TrainingSession.fromJson).toList(),
+      activeTrainingSession: _activeTrainingSession(
+        json['activeTrainingSession'],
+      ),
       waterRecords: waterRecords,
       water: waterTotals(waterRecords),
       weight: _doubleMap(json['weight']),
@@ -170,6 +178,39 @@ class AppSnapshot {
       syncCursor: SyncCursor.fromJson(json['syncCursor']),
     );
   }
+
+  AppSnapshot copyWith({
+    List<TrainingSession>? training,
+    ActiveTrainingSession? activeTrainingSession,
+    bool clearActiveTrainingSession = false,
+  }) => AppSnapshot(
+    gender: gender,
+    birthYear: birthYear,
+    birthMonth: birthMonth,
+    birthDay: birthDay,
+    height: height,
+    currentWeight: currentWeight,
+    searchHistory: searchHistory,
+    targetP: targetP,
+    targetC: targetC,
+    targetF: targetF,
+    targetKcal: targetKcal,
+    resetHour: resetHour,
+    aiDismissedDate: aiDismissedDate,
+    foods: foods,
+    consumed: consumed,
+    exercises: exercises,
+    training: training ?? this.training,
+    activeTrainingSession: clearActiveTrainingSession
+        ? null
+        : activeTrainingSession ?? this.activeTrainingSession,
+    waterRecords: waterRecords,
+    water: water,
+    weight: weight,
+    pendingCloudDeletes: pendingCloudDeletes,
+    syncOperations: syncOperations,
+    syncCursor: syncCursor,
+  );
 
   AppSnapshot merge(AppSnapshot other) => AppSnapshot(
     gender: gender == '男' && other.gender != '男' ? other.gender : gender,
@@ -191,6 +232,9 @@ class AppSnapshot {
     consumed: _mergeById(consumed, other.consumed, (e) => e.id),
     exercises: _mergeById(exercises, other.exercises, (e) => e.id),
     training: _mergeById(training, other.training, (e) => e.id),
+    // Cloud snapshots never include this field. Prefer the receiver so a
+    // local active session survives either direction of the existing merge.
+    activeTrainingSession: activeTrainingSession ?? other.activeTrainingSession,
     waterRecords: _mergeById(waterRecords, other.waterRecords, (e) => e.id),
     water: waterTotals(
       _mergeById(waterRecords, other.waterRecords, (e) => e.id),
@@ -230,6 +274,7 @@ class AppSnapshot {
           .where((item) => !exerciseIds.contains(item.id))
           .toList(),
       training: training,
+      activeTrainingSession: activeTrainingSession,
       waterRecords: nextWaterRecords,
       water: waterTotals(nextWaterRecords),
       weight: weight,
@@ -249,6 +294,15 @@ class AppSnapshot {
           .toList(),
       syncCursor: syncCursor,
     );
+  }
+}
+
+ActiveTrainingSession? _activeTrainingSession(Object? value) {
+  if (value is! Map) return null;
+  try {
+    return ActiveTrainingSession.fromJson(Map<String, dynamic>.from(value));
+  } on FormatException {
+    return null;
   }
 }
 

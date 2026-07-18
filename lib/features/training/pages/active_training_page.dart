@@ -10,10 +10,15 @@ import '../domain/active_training_session.dart';
 import '../domain/training_session_state.dart';
 import '../services/exercise_replacement_service.dart';
 import '../services/training_session_engine.dart';
+import '../services/warmup_suggestion_service.dart';
 import '../widgets/exercise_replacement_sheet.dart';
+import '../widgets/plate_calculator_sheet.dart';
 import '../widgets/rir_selector.dart';
 import '../widgets/rest_timer_card.dart';
+import '../widgets/set_type_selector_sheet.dart';
+import '../widgets/superset_selector_sheet.dart';
 import '../widgets/training_set_input_card.dart';
+import '../widgets/warmup_suggestion_sheet.dart';
 import 'training_completion_page.dart';
 
 class ActiveTrainingPage extends StatefulWidget {
@@ -207,16 +212,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   }
 
   Future<void> _activateNextSet() async {
-    final exercise = _nextPendingExercise ?? _exercise;
-    if (exercise == null) return;
-    final next = exercise.sets
-        .where((set) => set.completedAt == null)
-        .firstOrNull;
-    if (next?.id == null || exercise.exerciseId == null) return;
-    final active = await widget.engine.startSet(
-      exerciseId: exercise.exerciseId!,
-      setId: next!.id!,
-    );
+    final active = await widget.engine.startNextAvailableSet();
     _setSession(active);
     await _loadLastPerformance();
     final current = _set;
@@ -267,6 +263,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
     int? reps,
     int? rir,
     int? restSeconds,
+    TrainingSetType? setType,
   }) async {
     final set = _set;
     if (set?.id == null || _busy) return;
@@ -278,6 +275,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
         reps: reps,
         rir: rir,
         restSeconds: restSeconds,
+        setType: setType,
       );
       _autofilled = false;
       _setSession(updated);
@@ -309,7 +307,8 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
     if (set?.id == null) return;
     setState(() => _busy = true);
     try {
-      final completed = await widget.engine.completeSet(setId: set!.id!);
+      final completedSetIndex = _setIndex;
+      final completed = await widget.engine.completeSetForFlow(setId: set!.id!);
       _setSession(completed);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -317,24 +316,158 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
             duration: const Duration(milliseconds: 1100),
             backgroundColor: const Color(0xFF008C8C),
             content: Text(
-              '第 ${_setIndex + 1} 组已记录  ·  ${set.weight.toStringAsFixed(1)} kg × ${set.reps}',
+              '第 ${completedSetIndex + 1} 组已记录  ·  ${set.weight.toStringAsFixed(1)} kg × ${set.reps}',
             ),
           ),
         );
-      }
-      if (_hasPendingSets) {
-        final duration = set.restSeconds > 0 ? set.restSeconds : 90;
-        final resting = await widget.engine.startRest(
-          setId: set.id!,
-          durationSeconds: duration,
-        );
-        _setSession(resting);
       }
     } catch (error) {
       _showSaveError(error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _showSetTypeSelector() async {
+    final set = _set;
+    if (set?.id == null || _busy) return;
+    final selected = await SetTypeSelectorSheet.show(
+      context,
+      current: set!.resolvedSetType,
+    );
+    if (selected == null || !mounted) return;
+    if (selected == TrainingSetType.superset) {
+      await _configureSuperset();
+      return;
+    }
+    await _updateSet(setType: selected);
+  }
+
+  Future<void> _configureSuperset() async {
+    final exercise = _exercise;
+    if (exercise?.exerciseId == null) return;
+    final candidates = _activeExercises
+        .where(
+          (candidate) =>
+              candidate.exerciseId != null &&
+              candidate.exerciseId != exercise!.exerciseId,
+        )
+        .toList(growable: false);
+    final selection = await SupersetSelectorSheet.show(
+      context,
+      candidates: candidates,
+    );
+    if (selection == null || !mounted) return;
+    try {
+      ActiveTrainingSession updated;
+      if (!selection.selectOther && selection.exerciseId != null) {
+        updated = await widget.engine.pairSuperset(
+          firstExerciseId: exercise!.exerciseId!,
+          secondExerciseId: selection.exerciseId!,
+        );
+      } else {
+        final selected = await SupersetSelectorSheet.showCatalog(
+          context,
+          catalog: widget.catalog,
+          excludedIds: _activeExercises
+              .map((item) => item.exerciseId)
+              .whereType<String>()
+              .toSet(),
+        );
+        if (selected == null || !mounted) return;
+        final setCount = exercise!.sets.isEmpty ? 4 : exercise.sets.length;
+        updated = await widget.engine.addSupersetPartner(
+          firstExerciseId: exercise.exerciseId!,
+          partner: TrainingExercise(
+            exerciseId: selected.id,
+            exerciseName: selected.name,
+            bodyPart: selected.bodyPart,
+            sets: List.generate(
+              setCount,
+              (index) => SetRecord(
+                id: '${_session.id}-${selected.id}-${index + 1}',
+                setType: TrainingSetType.superset,
+              ),
+            ),
+          ),
+        );
+      }
+      _setSession(updated);
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  Future<void> _clearSuperset() async {
+    final exerciseId = _exercise?.exerciseId;
+    if (exerciseId == null) return;
+    try {
+      _setSession(await widget.engine.clearSuperset(exerciseId: exerciseId));
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  Future<void> _showWarmupSuggestions() async {
+    final exercise = _exercise;
+    if (exercise?.exerciseId == null) return;
+    final definition = widget.catalog
+        .where((item) => item.id == exercise!.exerciseId)
+        .firstOrNull;
+    if (definition == null) return;
+    final targetSet = exercise!.sets
+        .where(
+          (set) =>
+              set.completedAt == null &&
+              set.resolvedSetType == TrainingSetType.working &&
+              set.weight > 0,
+        )
+        .firstOrNull;
+    final targetWeight = targetSet?.weight ?? _set?.weight ?? 0;
+    final suggestions = const WarmupSuggestionService().suggest(
+      exercise: definition,
+      targetWorkingWeight: targetWeight,
+    );
+    if (suggestions.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前动作不需要额外热身建议，或尚未设置工作重量。')),
+        );
+      }
+      return;
+    }
+    final viewOnly = exercise.sets.any(
+      (set) =>
+          set.completedAt != null &&
+          set.resolvedSetType == TrainingSetType.working,
+    );
+    final confirmed = await WarmupSuggestionSheet.show(
+      context,
+      targetWeight: targetWeight,
+      suggestions: suggestions,
+      viewOnly: viewOnly,
+    );
+    if (confirmed == null || !mounted) return;
+    try {
+      final updated = await widget.engine.insertWarmupSuggestions(
+        exerciseId: exercise.exerciseId!,
+        suggestions: confirmed,
+      );
+      _setSession(updated);
+      await _loadLastPerformance();
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  Future<void> _showPlateCalculator() async {
+    final set = _set;
+    if (set?.id == null) return;
+    final applied = await PlateCalculatorSheet.show(
+      context,
+      initialTarget: set!.weight,
+    );
+    if (applied != null && mounted) await _updateSet(weight: applied);
   }
 
   Future<void> _replaceExercise() async {
@@ -742,6 +875,21 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
     ),
   );
 
+  String _supersetLabel(TrainingExercise exercise) {
+    final groupId = exercise.supersetGroupId;
+    final members =
+        _activeExercises
+            .where((item) => item.supersetGroupId == groupId)
+            .toList()
+          ..sort(
+            (a, b) => (a.orderIndex ?? _activeExercises.indexOf(a)).compareTo(
+              b.orderIndex ?? _activeExercises.indexOf(b),
+            ),
+          );
+    if (members.length != 2) return '超级组';
+    return '超级组 · ${members.first.exerciseName} → ${members.last.exerciseName}';
+  }
+
   void _showSaveError(Object error) {
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -797,6 +945,31 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ListTile(
+                        leading: const Icon(Icons.fitness_center),
+                        title: const Text('热身组建议'),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _showWarmupSuggestions();
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.calculate_outlined),
+                        title: const Text('杠铃片计算器'),
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _showPlateCalculator();
+                        },
+                      ),
+                      if (_exercise?.supersetGroupId != null)
+                        ListTile(
+                          leading: const Icon(Icons.link_off),
+                          title: const Text('解除超级组'),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            _clearSuperset();
+                          },
+                        ),
+                      ListTile(
                         leading: const Icon(Icons.swap_horiz),
                         title: const Text('替换动作'),
                         onTap: () {
@@ -850,13 +1023,53 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  '第 ${_setIndex + 1} / ${exercise.sets.length} 组  ·  已完成 $completedSets 组',
-                  style: const TextStyle(
-                    color: Color(0xFF7D8583),
-                    fontSize: 14,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '第 ${_setIndex + 1} / ${exercise.sets.length} 组  ·  已完成 $completedSets 组',
+                        style: const TextStyle(
+                          color: Color(0xFF7D8583),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      key: const Key('training-set-type-entry'),
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: _showSetTypeSelector,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              SetTypeSelectorSheet.labels[set.resolvedSetType]!,
+                              style: const TextStyle(
+                                color: Color(0xFF68716F),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const Icon(
+                              Icons.chevron_right,
+                              size: 17,
+                              color: Color(0xFF7D8583),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+                if (exercise.supersetGroupId != null)
+                  Text(
+                    _supersetLabel(exercise),
+                    style: const TextStyle(
+                      color: Color(0xFF008C8C),
+                      fontSize: 12,
+                    ),
+                  ),
                 if (_lastPerformance != null) ...[
                   const SizedBox(height: 18),
                   Container(

@@ -93,6 +93,7 @@ class TrainingExercise {
   int? orderIndex;
   TrainingExerciseStatus? status;
   String? substitutedFromExerciseId;
+  String? supersetGroupId;
 
   TrainingExercise({
     this.exerciseId,
@@ -102,6 +103,7 @@ class TrainingExercise {
     this.orderIndex,
     this.status,
     this.substitutedFromExerciseId,
+    this.supersetGroupId,
   });
 
   double get totalVolume => sets.fold(0, (sum, set) => sum + set.setVolume);
@@ -114,6 +116,7 @@ class TrainingExercise {
     'orderIndex': orderIndex,
     'status': status?.storageValue,
     'substitutedFromExerciseId': substitutedFromExerciseId,
+    'supersetGroupId': supersetGroupId,
   };
 
   factory TrainingExercise.fromJson(Map<String, dynamic> json) =>
@@ -132,6 +135,7 @@ class TrainingExercise {
         substitutedFromExerciseId: _nullableString(
           json['substitutedFromExerciseId'],
         ),
+        supersetGroupId: _nullableString(json['supersetGroupId']),
       );
 }
 

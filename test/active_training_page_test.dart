@@ -136,6 +136,108 @@ void main() {
     expect(find.text('下一组'), findsOneWidget);
   });
 
+  testWidgets('set type selector persists a non-working type', (tester) async {
+    final setup = await createSession(withHistory: false);
+    await tester.pumpWidget(
+      page(
+        active: setup.active,
+        engine: setup.engine,
+        repository: setup.repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('training-set-type-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('递减组').last);
+    await tester.pumpAndSettle();
+
+    final active = await setup.repository.loadActiveSession();
+    expect(
+      active?.draft.exercises.single.sets.first.resolvedSetType,
+      TrainingSetType.drop,
+    );
+    expect(find.text('递减组'), findsOneWidget);
+  });
+
+  testWidgets('warm-up suggestions mutate only after user confirmation', (
+    tester,
+  ) async {
+    final setup = await createSession();
+    await tester.pumpWidget(
+      page(
+        active: setup.active,
+        engine: setup.engine,
+        repository: setup.repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('热身组建议'));
+    await tester.pumpAndSettle();
+    expect(
+      (await setup.repository.loadActiveSession())
+          ?.draft
+          .exercises
+          .single
+          .sets
+          .length,
+      2,
+    );
+    await tester.tap(find.text('加入本次训练'));
+    await tester.pumpAndSettle();
+
+    final active = await setup.repository.loadActiveSession();
+    expect(active?.draft.exercises.single.sets.length, 5);
+    expect(
+      active?.draft.exercises.single.sets.first.resolvedSetType,
+      TrainingSetType.warmup,
+    );
+  });
+
+  testWidgets('plate calculator applies weight only after explicit tap', (
+    tester,
+  ) async {
+    final setup = await createSession(withHistory: false);
+    await tester.pumpWidget(
+      page(
+        active: setup.active,
+        engine: setup.engine,
+        repository: setup.repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('杠铃片计算器'));
+    await tester.pumpAndSettle();
+    expect(
+      (await setup.repository.loadActiveSession())
+          ?.draft
+          .exercises
+          .single
+          .sets
+          .first
+          .weight,
+      0,
+    );
+    await tester.tap(find.byKey(const Key('plate-apply-button')));
+    await tester.pumpAndSettle();
+    expect(
+      (await setup.repository.loadActiveSession())
+          ?.draft
+          .exercises
+          .single
+          .sets
+          .first
+          .weight,
+      100,
+    );
+  });
+
   testWidgets('replaces the current exercise and activates its first set', (
     tester,
   ) async {

@@ -38,7 +38,13 @@ class TrainingSessionEngine {
     return active;
   }
 
-  Future<ActiveTrainingSession?> restore() => _repository.loadActiveSession();
+  Future<ActiveTrainingSession?> restore() async {
+    final active = await _repository.loadActiveSession();
+    if (active == null) return null;
+    final recovered = active.recoverAt(_clock());
+    if (recovered != active) await _repository.saveActiveSession(recovered);
+    return recovered;
+  }
 
   Future<ActiveTrainingSession> confirmSession() =>
       _transition(TrainingSessionEvent.confirmSession);
@@ -67,11 +73,21 @@ class TrainingSessionEngine {
     );
   }
 
+  Future<ActiveTrainingSession> completeSetAndStartRest({
+    required String setId,
+    required int durationSeconds,
+    DateTime? completedAt,
+  }) async {
+    await completeSet(setId: setId, completedAt: completedAt);
+    return startRest(setId: setId, durationSeconds: durationSeconds);
+  }
+
   Future<ActiveTrainingSession> updateSet({
     required String setId,
     double? weight,
     int? reps,
     int? rir,
+    int? restSeconds,
     bool? reachedFailure,
   }) async {
     final active = await _requiredActive();
@@ -80,6 +96,9 @@ class TrainingSessionEngine {
     if (weight != null) set.weight = weight < 0 ? 0 : weight;
     if (reps != null) set.reps = reps < 0 ? 0 : reps;
     if (rir != null) set.rir = rir.clamp(0, 3);
+    if (restSeconds != null) {
+      set.restSeconds = restSeconds < 0 ? 0 : restSeconds;
+    }
     if (reachedFailure != null) set.reachedFailure = reachedFailure;
     final next = active.copyWith(updatedAt: _clock());
     await _repository.saveActiveSession(next);
@@ -103,6 +122,33 @@ class TrainingSessionEngine {
         restDurationSeconds: durationSeconds,
       ),
     );
+  }
+
+  Future<ActiveTrainingSession> updateRestDuration({
+    required int durationSeconds,
+  }) async {
+    if (durationSeconds < 0) {
+      throw ArgumentError.value(durationSeconds, 'durationSeconds');
+    }
+    final active = await _requiredActive();
+    final rest = active.rest;
+    if (active.state != TrainingSessionState.resting || rest == null) {
+      throw StateError('No active rest timer.');
+    }
+    final now = _clock();
+    final expectedEnd = rest.restStartedAt.add(
+      Duration(seconds: durationSeconds),
+    );
+    if (!expectedEnd.isAfter(now)) return restFinished();
+    final updated = active.copyWith(
+      rest: rest.copyWith(
+        restDurationSeconds: durationSeconds,
+        restExpectedEndAt: expectedEnd,
+      ),
+      updatedAt: now,
+    );
+    await _repository.saveActiveSession(updated);
+    return updated;
   }
 
   Future<ActiveTrainingSession> skipRest() =>

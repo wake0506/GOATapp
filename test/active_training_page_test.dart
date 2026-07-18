@@ -94,6 +94,7 @@ void main() {
       catalog: exerciseCatalog,
       onSessionChanged: (_) {},
       onFinished: (_) async {},
+      clock: () => now,
     ),
   );
 
@@ -130,7 +131,7 @@ void main() {
     await tester.tap(find.byKey(const Key('training-complete-set')));
     await tester.pump();
     final completed = await setup.repository.loadActiveSession();
-    expect(completed?.state, TrainingSessionState.setCompleted);
+    expect(completed?.state, TrainingSessionState.resting);
     expect(completed?.draft.exercises.first.sets.first.completedAt, now);
     expect(find.text('下一组'), findsOneWidget);
   });
@@ -173,6 +174,111 @@ void main() {
     expect(find.text(candidate.name), findsOneWidget);
     expect(find.text('动作 1 / 1'), findsOneWidget);
     expect(find.text('完成本组'), findsOneWidget);
+  });
+
+  testWidgets('completed set enters rest and skip starts the next set', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    final setup = await createSession(withHistory: false);
+    await tester.pumpWidget(
+      page(
+        active: setup.active,
+        engine: setup.engine,
+        repository: setup.repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('training-complete-set')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('rest-timer-card')), findsOneWidget);
+    expect(
+      (await setup.repository.loadActiveSession())?.state,
+      TrainingSessionState.resting,
+    );
+
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('rest-skip')),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const Key('rest-skip')));
+    await tester.pumpAndSettle();
+    expect(
+      (await setup.repository.loadActiveSession())?.state,
+      TrainingSessionState.readyForNextSet,
+    );
+    await tester.tap(find.byKey(const Key('training-start-next-set')));
+    await tester.pumpAndSettle();
+    final next = await setup.repository.loadActiveSession();
+    expect(next?.state, TrainingSessionState.activeSet);
+    expect(next?.currentSetId, 'set-2');
+  });
+
+  testWidgets('rest timer reaches ready state from absolute time', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    var clock = now;
+    final setup = await createSession(withHistory: false);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ActiveTrainingPage(
+          initialSession: setup.active,
+          engine: TrainingSessionEngine(
+            repository: setup.repository,
+            clock: () => clock,
+          ),
+          repository: setup.repository,
+          catalog: exerciseCatalog,
+          clock: () => clock,
+          onSessionChanged: (_) {},
+          onFinished: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('training-complete-set')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('rest-timer-card')), findsOneWidget);
+
+    clock = now.add(const Duration(seconds: 90));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(
+      (await setup.repository.loadActiveSession())?.state,
+      TrainingSessionState.readyForNextSet,
+    );
+    expect(find.text('休息已结束'), findsOneWidget);
+  });
+
+  testWidgets('rest duration sheet applies preset to timer and current set', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    final setup = await createSession(withHistory: false);
+    await tester.pumpWidget(
+      page(
+        active: setup.active,
+        engine: setup.engine,
+        repository: setup.repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('training-complete-set')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('rest-duration-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('120 秒'));
+    await tester.pumpAndSettle();
+
+    final active = await setup.repository.loadActiveSession();
+    expect(active?.rest?.restDurationSeconds, 120);
+    expect(active?.draft.exercises.single.sets.first.restSeconds, 120);
   });
 
   testWidgets(

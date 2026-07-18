@@ -70,13 +70,20 @@ class TrainingSessionStateMachine {
         TrainingSessionState.resting,
       (TrainingSessionState.resting, TrainingSessionEvent.skipRest) ||
       (TrainingSessionState.resting, TrainingSessionEvent.restFinished) ||
+      (TrainingSessionState.resting, TrainingSessionEvent.nextSet) ||
       (
         TrainingSessionState.setCompleted,
         TrainingSessionEvent.nextSet,
       ) => TrainingSessionState.readyForNextSet,
+      (TrainingSessionState.readyForNextSet, TrainingSessionEvent.nextSet) =>
+        TrainingSessionState.readyForNextSet,
       (TrainingSessionState.activeSet, TrainingSessionEvent.replaceExercise) ||
       (
         TrainingSessionState.setCompleted,
+        TrainingSessionEvent.replaceExercise,
+      ) ||
+      (
+        TrainingSessionState.resting,
         TrainingSessionEvent.replaceExercise,
       ) => TrainingSessionState.readyForNextSet,
       (TrainingSessionState.preparing, TrainingSessionEvent.replaceExercise) ||

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../exercise_catalog.dart';
 import '../../../models/training.dart';
@@ -9,6 +12,7 @@ import '../services/exercise_replacement_service.dart';
 import '../services/training_session_engine.dart';
 import '../widgets/exercise_replacement_sheet.dart';
 import '../widgets/rir_selector.dart';
+import '../widgets/rest_timer_card.dart';
 import '../widgets/training_set_input_card.dart';
 import 'training_completion_page.dart';
 
@@ -21,6 +25,7 @@ class ActiveTrainingPage extends StatefulWidget {
     required this.catalog,
     required this.onSessionChanged,
     required this.onFinished,
+    this.clock,
   });
 
   final ActiveTrainingSession initialSession;
@@ -29,25 +34,31 @@ class ActiveTrainingPage extends StatefulWidget {
   final List<ExerciseDefinition> catalog;
   final ValueChanged<ActiveTrainingSession> onSessionChanged;
   final Future<void> Function(TrainingSession) onFinished;
+  final DateTime Function()? clock;
 
   @override
   State<ActiveTrainingPage> createState() => _ActiveTrainingPageState();
 }
 
-class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
+class _ActiveTrainingPageState extends State<ActiveTrainingPage>
+    with WidgetsBindingObserver {
   late ActiveTrainingSession _session = widget.initialSession;
   ExercisePerformance? _lastPerformance;
   bool _autofilled = false;
   bool _busy = false;
+  Timer? _restTimer;
+  bool _restNoticeShown = false;
+
+  DateTime _now() => widget.clock?.call() ?? DateTime.now();
 
   TrainingExercise? get _exercise {
-    for (final exercise in _session.draft.exercises.reversed) {
-      if (exercise.status != TrainingExerciseStatus.replaced &&
-          (exercise.exerciseId == _session.currentExerciseId ||
-              _session.currentExerciseId == null)) {
-        return exercise;
-      }
-    }
+    final current = _activeExercises.where(
+      (exercise) => exercise.exerciseId == _session.currentExerciseId,
+    );
+    if (current.isNotEmpty) return current.first;
+    final pending = _nextPendingExercise;
+    if (pending != null) return pending;
+    if (_activeExercises.isNotEmpty) return _activeExercises.last;
     return null;
   }
 
@@ -63,6 +74,28 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
     return exercise.sets.isEmpty ? null : exercise.sets.last;
   }
 
+  List<TrainingExercise> get _activeExercises => _session.draft.exercises
+      .where((exercise) => exercise.status != TrainingExerciseStatus.replaced)
+      .toList(growable: false);
+
+  TrainingExercise? get _nextPendingExercise {
+    final exercises = _activeExercises;
+    final currentIndex = exercises.indexWhere(
+      (exercise) => exercise.exerciseId == _session.currentExerciseId,
+    );
+    final ordered = currentIndex < 0
+        ? exercises
+        : [...exercises.skip(currentIndex), ...exercises.take(currentIndex)];
+    for (final exercise in ordered) {
+      if (exercise.sets.any((set) => set.completedAt == null)) return exercise;
+    }
+    return null;
+  }
+
+  bool get _hasPendingSets => _activeExercises.any(
+    (exercise) => exercise.sets.any((set) => set.completedAt == null),
+  );
+
   int get _setIndex {
     final exercise = _exercise;
     final set = _set;
@@ -73,7 +106,25 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _restTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_reconcileAfterResume());
+    } else {
+      _restTimer?.cancel();
+      _restTimer = null;
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -85,7 +136,8 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
         active = await widget.engine.resume();
       }
       _setSession(active);
-      if (active.state == TrainingSessionState.readyForNextSet) {
+      if (active.state == TrainingSessionState.readyForNextSet &&
+          active.currentSetId == null) {
         await _activateNextSet();
       } else {
         await _loadLastPerformance();
@@ -95,8 +147,67 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
     }
   }
 
+  Future<void> _reconcileAfterResume() async {
+    try {
+      final wasResting = _session.state == TrainingSessionState.resting;
+      final active = await widget.engine.restore();
+      if (active == null || !mounted) return;
+      _setSession(active);
+      await _loadLastPerformance();
+      if (wasResting && active.state == TrainingSessionState.readyForNextSet) {
+        _notifyRestFinished();
+      }
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  void _startRestTicker() {
+    _restTimer?.cancel();
+    _restTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => unawaited(_tickRest()),
+    );
+    unawaited(_tickRest());
+  }
+
+  Future<void> _tickRest() async {
+    final rest = _session.rest;
+    if (_session.state != TrainingSessionState.resting || rest == null) {
+      _restTimer?.cancel();
+      _restTimer = null;
+      return;
+    }
+    if (rest.isFinishedAt(_now())) {
+      _restTimer?.cancel();
+      _restTimer = null;
+      try {
+        final ready = await widget.engine.restFinished();
+        _setSession(ready);
+        _notifyRestFinished();
+      } catch (error) {
+        _showSaveError(error);
+      }
+      return;
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _notifyRestFinished() {
+    if (!mounted || _restNoticeShown) return;
+    _restNoticeShown = true;
+    HapticFeedback.mediumImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        duration: Duration(milliseconds: 1400),
+        backgroundColor: Color(0xFF008C8C),
+        content: Text('休息结束，准备下一组'),
+      ),
+    );
+  }
+
   Future<void> _activateNextSet() async {
-    final exercise = _exercise;
+    final exercise = _nextPendingExercise ?? _exercise;
     if (exercise == null) return;
     final next = exercise.sets
         .where((set) => set.completedAt == null)
@@ -142,9 +253,21 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
     _session = value;
     widget.onSessionChanged(value);
     if (mounted) setState(() {});
+    if (value.state == TrainingSessionState.resting) {
+      _restNoticeShown = false;
+      _startRestTicker();
+    } else {
+      _restTimer?.cancel();
+      _restTimer = null;
+    }
   }
 
-  Future<void> _updateSet({double? weight, int? reps, int? rir}) async {
+  Future<void> _updateSet({
+    double? weight,
+    int? reps,
+    int? rir,
+    int? restSeconds,
+  }) async {
     final set = _set;
     if (set?.id == null || _busy) return;
     setState(() => _busy = true);
@@ -154,6 +277,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
         weight: weight,
         reps: reps,
         rir: rir,
+        restSeconds: restSeconds,
       );
       _autofilled = false;
       _setSession(updated);
@@ -166,10 +290,13 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
 
   Future<void> _completeOrNext() async {
     if (_busy) return;
+    if (_session.state == TrainingSessionState.resting) return;
+    if (_session.state == TrainingSessionState.readyForNextSet) {
+      await _activateNextSet();
+      return;
+    }
     if (_session.state == TrainingSessionState.setCompleted) {
-      final remaining =
-          _exercise?.sets.any((set) => set.completedAt == null) == true;
-      if (remaining) {
+      if (_hasPendingSets) {
         final ready = await widget.engine.nextSet();
         _setSession(ready);
         await _activateNextSet();
@@ -194,6 +321,14 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
             ),
           ),
         );
+      }
+      if (_hasPendingSets) {
+        final duration = set.restSeconds > 0 ? set.restSeconds : 90;
+        final resting = await widget.engine.startRest(
+          setId: set.id!,
+          durationSeconds: duration,
+        );
+        _setSession(resting);
       }
     } catch (error) {
       _showSaveError(error);
@@ -254,6 +389,236 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
     } catch (error) {
       _showSaveError(error);
     }
+  }
+
+  Future<void> _startNextSet() async {
+    if (_busy) return;
+    try {
+      if (_session.state == TrainingSessionState.resting) {
+        _setSession(await widget.engine.skipRest());
+      }
+      if (_session.state == TrainingSessionState.readyForNextSet) {
+        await _activateNextSet();
+      }
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  Future<void> _skipRest() async {
+    if (_session.state != TrainingSessionState.resting) return;
+    try {
+      _setSession(await widget.engine.skipRest());
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  Future<void> _changeRestDuration() async {
+    if (_session.state != TrainingSessionState.resting) return;
+    final duration = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(8, 8, 8, 10),
+              child: Text(
+                '休息时间',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+            for (final seconds in const [60, 90, 120, 180])
+              ListTile(
+                leading: Icon(
+                  seconds == (_session.rest?.restDurationSeconds ?? -1)
+                      ? Icons.check_circle
+                      : Icons.timer_outlined,
+                  color: seconds == (_session.rest?.restDurationSeconds ?? -1)
+                      ? const Color(0xFF008C8C)
+                      : const Color(0xFF8A9290),
+                ),
+                title: Text('$seconds 秒'),
+                onTap: () => Navigator.pop(sheetContext, seconds),
+              ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('自定义'),
+              onTap: () => Navigator.pop(sheetContext, -1),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || duration == null) return;
+    if (duration == -1) {
+      await _showCustomRestDuration();
+      return;
+    }
+    await _applyRestDuration(duration);
+  }
+
+  Future<void> _showCustomRestDuration() async {
+    final controller = TextEditingController(
+      text: '${_session.rest?.restDurationSeconds ?? 90}',
+    );
+    final duration = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('自定义休息时间'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '秒数（15–600）',
+            suffixText: '秒',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              int.tryParse(controller.text.trim()),
+            ),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF008C8C),
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || duration == null) return;
+    if (duration < 15 || duration > 600) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请输入 15–600 秒的休息时间')));
+      return;
+    }
+    await _applyRestDuration(duration);
+  }
+
+  Future<void> _applyRestDuration(int duration) async {
+    final set = _set;
+    if (set?.id == null) return;
+    try {
+      await _updateSet(restSeconds: duration);
+      final updated = await widget.engine.updateRestDuration(
+        durationSeconds: duration,
+      );
+      _setSession(updated);
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  String _nextSetLabel() {
+    final exercise = _nextPendingExercise;
+    final next = exercise?.sets
+        .where((set) => set.completedAt == null)
+        .firstOrNull;
+    if (next == null) return '准备完成本次训练';
+    return '${next.weight.toStringAsFixed(1)} kg × ${next.reps}';
+  }
+
+  Widget _buildRestBody() {
+    final rest = _session.rest!;
+    final nextExercise = _nextPendingExercise ?? _exercise;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
+      children: [
+        const Text(
+          '本组已记录',
+          style: TextStyle(
+            color: Color(0xFF1F2725),
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '${_exercise?.exerciseName ?? '训练'} · 准备下一组',
+          style: const TextStyle(color: Color(0xFF7D8583), fontSize: 14),
+        ),
+        const SizedBox(height: 18),
+        RestTimerCard(
+          remainingSeconds: rest.remainingAt(_now()).inSeconds,
+          totalSeconds: rest.restDurationSeconds,
+          exerciseName: nextExercise?.exerciseName ?? _session.draft.name,
+          nextSetLabel: _nextSetLabel(),
+          onStartNextSet: _startNextSet,
+          onSkipRest: _skipRest,
+          onChangeDuration: _changeRestDuration,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReadyBody() {
+    final exercise = _nextPendingExercise ?? _exercise;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.check_circle_outline,
+                color: Color(0xFF008C8C),
+                size: 42,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '休息已结束',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                exercise == null ? '本次训练已完成' : '下一组 · ${_nextSetLabel()}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFF7D8583)),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: FilledButton(
+                  key: const Key('training-start-next-set'),
+                  onPressed: _hasPendingSets ? _startNextSet : _finishTraining,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF008C8C),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                  ),
+                  child: Text(
+                    _hasPendingSets ? '开始下一组' : '完成训练',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Future<void> _finishTraining() async {
@@ -469,6 +834,10 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage> {
       ),
       body: exercise == null || set == null
           ? const Center(child: Text('当前训练没有可记录的动作'))
+          : _session.state == TrainingSessionState.resting
+          ? _buildRestBody()
+          : _session.state == TrainingSessionState.readyForNextSet
+          ? _buildReadyBody()
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
               children: [

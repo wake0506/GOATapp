@@ -17,6 +17,17 @@ class RestState {
   final int restDurationSeconds;
   final DateTime restExpectedEndAt;
 
+  RestState copyWith({
+    DateTime? restStartedAt,
+    int? restDurationSeconds,
+    DateTime? restExpectedEndAt,
+  }) => RestState(
+    setId: setId,
+    restStartedAt: restStartedAt ?? this.restStartedAt,
+    restDurationSeconds: restDurationSeconds ?? this.restDurationSeconds,
+    restExpectedEndAt: restExpectedEndAt ?? this.restExpectedEndAt,
+  );
+
   Duration remainingAt(DateTime now) {
     final remaining = restExpectedEndAt.difference(now);
     return remaining.isNegative ? Duration.zero : remaining;

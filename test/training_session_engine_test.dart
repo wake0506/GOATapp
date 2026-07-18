@@ -214,6 +214,86 @@ void main() {
         TrainingSessionState.readyForNextSet,
       );
     });
+
+    test('rest duration can be changed from the original start time', () async {
+      var clock = now.add(const Duration(seconds: 30));
+      final repository = InMemoryTrainingRepository(
+        activeSession: active(
+          state: TrainingSessionState.resting,
+          rest: RestState(
+            setId: 'set-1',
+            restStartedAt: now,
+            restDurationSeconds: 90,
+          ),
+        ),
+      );
+      final engine = TrainingSessionEngine(
+        repository: repository,
+        clock: () => clock,
+      );
+
+      final updated = await engine.updateRestDuration(durationSeconds: 120);
+      expect(updated.rest?.restDurationSeconds, 120);
+      expect(updated.rest?.remainingAt(clock).inSeconds, 90);
+
+      clock = now.add(const Duration(seconds: 121));
+      final expired = await engine.restore();
+      expect(expired?.state, TrainingSessionState.readyForNextSet);
+      expect(expired?.rest, isNull);
+    });
+
+    test(
+      'shortening an already elapsed rest immediately finishes it',
+      () async {
+        final clock = now.add(const Duration(seconds: 80));
+        final repository = InMemoryTrainingRepository(
+          activeSession: active(
+            state: TrainingSessionState.resting,
+            rest: RestState(
+              setId: 'set-1',
+              restStartedAt: now,
+              restDurationSeconds: 120,
+            ),
+          ),
+        );
+        final engine = TrainingSessionEngine(
+          repository: repository,
+          clock: () => clock,
+        );
+
+        final updated = await engine.updateRestDuration(durationSeconds: 60);
+        expect(updated.state, TrainingSessionState.readyForNextSet);
+        expect(updated.rest, isNull);
+      },
+    );
+
+    test(
+      'completeSetAndStartRest persists both completion and rest state',
+      () async {
+        final repository = InMemoryTrainingRepository();
+        final engine = TrainingSessionEngine(
+          repository: repository,
+          clock: () => now,
+        );
+        await engine.startSession(activeSessionId: 'active-1', draft: draft());
+        await engine.confirmSession();
+        await engine.startSet(
+          exerciseId: 'bench_press_barbell',
+          setId: 'set-1',
+        );
+
+        final resting = await engine.completeSetAndStartRest(
+          setId: 'set-1',
+          durationSeconds: 60,
+        );
+        expect(resting.state, TrainingSessionState.resting);
+        expect(
+          resting.rest?.restExpectedEndAt,
+          now.add(const Duration(seconds: 60)),
+        );
+        expect(resting.draft.exercises.single.sets.single.completedAt, now);
+      },
+    );
   });
 
   group('last performance', () {

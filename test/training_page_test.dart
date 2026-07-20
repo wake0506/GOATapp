@@ -76,7 +76,7 @@ void main() {
     await tester.tap(find.text('PPL-推力日'));
     await tester.tap(find.text('全身循环燃脂'));
     await tester.tap(find.text('查看训练历史'));
-    await tester.tap(find.text('管理训练模板'));
+    await tester.tap(find.text('创建 / 管理训练方案'));
 
     expect(startCount, 1);
     expect(pplCount, 1);

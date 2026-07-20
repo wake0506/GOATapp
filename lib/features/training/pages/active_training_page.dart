@@ -74,7 +74,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
       if (set.id == _session.currentSetId) return set;
     }
     for (final set in exercise.sets) {
-      if (set.completedAt == null) return set;
+      if (set.completedAt == null && !set.replacementPlaceholder) return set;
     }
     return exercise.sets.isEmpty ? null : exercise.sets.last;
   }
@@ -92,13 +92,19 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
         ? exercises
         : [...exercises.skip(currentIndex), ...exercises.take(currentIndex)];
     for (final exercise in ordered) {
-      if (exercise.sets.any((set) => set.completedAt == null)) return exercise;
+      if (exercise.sets.any(
+        (set) => set.completedAt == null && !set.replacementPlaceholder,
+      )) {
+        return exercise;
+      }
     }
     return null;
   }
 
   bool get _hasPendingSets => _activeExercises.any(
-    (exercise) => exercise.sets.any((set) => set.completedAt == null),
+    (exercise) => exercise.sets.any(
+      (set) => set.completedAt == null && !set.replacementPlaceholder,
+    ),
   );
 
   int get _setIndex {
@@ -234,13 +240,32 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
 
   Future<void> _loadLastPerformance() async {
     final exercise = _exercise;
-    if (exercise == null) return;
+    final set = _set;
+    if (exercise == null ||
+        set == null ||
+        set.resolvedSetType != TrainingSetType.working) {
+      if (mounted) {
+        setState(() {
+          _lastPerformance = null;
+          _autofilled = false;
+        });
+      }
+      return;
+    }
+    final workingSets = exercise.sets
+        .where(
+          (candidate) =>
+              candidate.resolvedSetType == TrainingSetType.working &&
+              !candidate.replacementPlaceholder,
+        )
+        .toList(growable: false);
+    final workingOrdinal = workingSets.indexOf(set);
     final result = await widget.repository.findLastPerformance(
       ExerciseReference(
         exerciseId: exercise.exerciseId,
         exerciseName: exercise.exerciseName,
       ),
-      setOrdinal: _setIndex < 0 ? null : _setIndex,
+      setOrdinal: workingOrdinal < 0 ? null : workingOrdinal,
     );
     if (mounted) setState(() => _lastPerformance = result);
   }
@@ -660,7 +685,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   String _nextSetLabel() {
     final exercise = _nextPendingExercise;
     final next = exercise?.sets
-        .where((set) => set.completedAt == null)
+        .where((set) => set.completedAt == null && !set.replacementPlaceholder)
         .firstOrNull;
     if (next == null) return '准备完成本次训练';
     return '${next.weight.toStringAsFixed(1)} kg × ${next.reps}';
@@ -1127,7 +1152,9 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
                     child: Text(
                       isSetCompleted
                           ? (exercise.sets.any(
-                                  (item) => item.completedAt == null,
+                                  (item) =>
+                                      item.completedAt == null &&
+                                      !item.replacementPlaceholder,
                                 )
                                 ? '下一组'
                                 : '完成训练')

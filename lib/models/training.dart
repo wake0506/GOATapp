@@ -13,6 +13,7 @@ class SetRecord {
   double? rpe;
   bool? reachedFailure;
   DateTime? completedAt;
+  bool replacementPlaceholder;
 
   SetRecord({
     this.id,
@@ -26,6 +27,7 @@ class SetRecord {
     this.rpe,
     this.reachedFailure,
     this.completedAt,
+    this.replacementPlaceholder = false,
   });
 
   SetRecord copy() => SetRecord(
@@ -40,6 +42,7 @@ class SetRecord {
     rpe: rpe,
     reachedFailure: reachedFailure,
     completedAt: completedAt,
+    replacementPlaceholder: replacementPlaceholder,
   );
 
   double get setVolume => weight * reps;
@@ -60,6 +63,7 @@ class SetRecord {
     'rpe': rpe,
     'reachedFailure': reachedFailure,
     'completedAt': completedAt?.toUtc().toIso8601String(),
+    'replacementPlaceholder': replacementPlaceholder,
   };
 
   factory SetRecord.fromJson(Map<String, dynamic> json) => SetRecord(
@@ -76,6 +80,7 @@ class SetRecord {
         ? json['reachedFailure'] as bool
         : null,
     completedAt: DateTime.tryParse(stringValue(json['completedAt'])),
+    replacementPlaceholder: json['replacementPlaceholder'] == true,
   );
 }
 

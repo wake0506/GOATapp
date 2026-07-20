@@ -197,6 +197,100 @@ void main() {
     );
   });
 
+  testWidgets(
+    'warm-up sets do not autofill and working history keeps working ordinal',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      final previous = TrainingSession(
+        id: 'previous-working-ordinals',
+        name: '历史训练',
+        date: '2026-07-17',
+        exercises: [
+          TrainingExercise(
+            exerciseId: bench.id,
+            exerciseName: bench.name,
+            bodyPart: bench.bodyPart,
+            sets: [
+              SetRecord(
+                id: 'history-working-1',
+                weight: 65,
+                reps: 10,
+                setType: TrainingSetType.working,
+                completedAt: now,
+              ),
+              SetRecord(
+                id: 'history-working-2',
+                weight: 67.5,
+                reps: 9,
+                setType: TrainingSetType.working,
+                completedAt: now,
+              ),
+            ],
+          ),
+        ],
+      );
+      final repository = InMemoryTrainingRepository(
+        completedSessions: [previous],
+      );
+      final engine = TrainingSessionEngine(
+        repository: repository,
+        clock: () => now,
+      );
+      final active = await engine.startSession(
+        activeSessionId: 'active-warmup-ordinal',
+        draft: TrainingSession(
+          id: 'warmup-ordinal',
+          name: '热身序号验证',
+          date: '2026-07-18',
+          exercises: [
+            TrainingExercise(
+              exerciseId: bench.id,
+              exerciseName: bench.name,
+              bodyPart: bench.bodyPart,
+              sets: [
+                SetRecord(
+                  id: 'warmup-1',
+                  weight: 20,
+                  reps: 8,
+                  setType: TrainingSetType.warmup,
+                ),
+                SetRecord(id: 'working-1', setType: TrainingSetType.working),
+                SetRecord(id: 'working-2', setType: TrainingSetType.working),
+              ],
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(
+        page(active: active, engine: engine, repository: repository),
+      );
+      await tester.pumpAndSettle();
+
+      var persisted = await repository.loadActiveSession();
+      expect(persisted?.currentSetId, 'warmup-1');
+      expect(persisted?.draft.exercises.single.sets.first.weight, 20);
+      expect(find.textContaining('沿用上次'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('training-complete-set')));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('rest-skip')),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.byKey(const Key('rest-skip')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('training-start-next-set')));
+      await tester.pumpAndSettle();
+
+      persisted = await repository.loadActiveSession();
+      expect(persisted?.currentSetId, 'working-1');
+      expect(persisted?.draft.exercises.single.sets[1].weight, 65);
+      expect(persisted?.draft.exercises.single.sets[1].reps, 10);
+    },
+  );
+
   testWidgets('plate calculator applies weight only after explicit tap', (
     tester,
   ) async {
@@ -238,45 +332,66 @@ void main() {
     );
   });
 
-  testWidgets('replaces the current exercise and activates its first set', (
-    tester,
-  ) async {
-    final setup = await createSession(withHistory: false);
-    await tester.pumpWidget(
-      page(
-        active: setup.active,
-        engine: setup.engine,
-        repository: setup.repository,
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'replacement during rest preserves rest and resumes next ordinal',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      final setup = await createSession(withHistory: false);
+      await tester.pumpWidget(
+        page(
+          active: setup.active,
+          engine: setup.engine,
+          repository: setup.repository,
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('training-complete-set')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.more_horiz));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('替换动作'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('training-complete-set')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.more_horiz));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('替换动作'));
+      await tester.pumpAndSettle();
 
-    final candidate = const ExerciseReplacementService()
-        .rank(original: bench, catalog: exerciseCatalog)
-        .first
-        .exercise;
-    await tester.tap(find.byKey(Key('replacement-${candidate.id}')));
-    await tester.pumpAndSettle();
+      final candidate = const ExerciseReplacementService()
+          .rank(original: bench, catalog: exerciseCatalog)
+          .first
+          .exercise;
+      await tester.tap(find.byKey(Key('replacement-${candidate.id}')));
+      await tester.pumpAndSettle();
 
-    final active = await setup.repository.loadActiveSession();
-    expect(active?.currentExerciseId, candidate.id);
-    expect(active?.currentSetId, isNotNull);
-    expect(active?.state, TrainingSessionState.activeSet);
-    expect(
-      active?.draft.exercises.first.status,
-      TrainingExerciseStatus.replaced,
-    );
-    expect(find.text(candidate.name), findsOneWidget);
-    expect(find.text('动作 1 / 1'), findsOneWidget);
-    expect(find.text('完成本组'), findsOneWidget);
-  });
+      var active = await setup.repository.loadActiveSession();
+      expect(active?.currentExerciseId, candidate.id);
+      expect(active?.currentSetId, 'active-fast-${candidate.id}-1');
+      expect(active?.state, TrainingSessionState.resting);
+      expect(active?.rest, isNotNull);
+      expect(
+        active?.draft.exercises.last.sets.first.replacementPlaceholder,
+        isTrue,
+      );
+      expect(
+        active?.draft.exercises.first.status,
+        TrainingExerciseStatus.replaced,
+      );
+      expect(find.text(candidate.name), findsOneWidget);
+      expect(find.text('动作 1 / 1'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('rest-skip')),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.byKey(const Key('rest-skip')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('training-start-next-set')));
+      await tester.pumpAndSettle();
+      active = await setup.repository.loadActiveSession();
+      expect(active?.state, TrainingSessionState.activeSet);
+      expect(active?.currentSetId, 'active-fast-${candidate.id}-2');
+      expect(find.text('完成本组'), findsOneWidget);
+    },
+  );
 
   testWidgets('completed set enters rest and skip starts the next set', (
     tester,

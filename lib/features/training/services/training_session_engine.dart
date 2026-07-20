@@ -275,17 +275,34 @@ class TrainingSessionEngine {
       ..status = TrainingExerciseStatus.planned
       ..orderIndex = original.orderIndex
       ..supersetGroupId = original.supersetGroupId;
+    for (
+      var index = 0;
+      index < original.sets.length && index < replacement.sets.length;
+      index++
+    ) {
+      if (original.sets[index].completedAt != null) {
+        replacement.sets[index].replacementPlaceholder = true;
+      }
+    }
     if (replacement.supersetGroupId != null) {
       for (final set in replacement.sets) {
         if (set.completedAt == null) set.setType = TrainingSetType.superset;
       }
     }
     active.draft.exercises.add(replacement);
+    final currentOrdinal = original.sets.indexWhere(
+      (set) => set.id == active.currentSetId,
+    );
+    final mappedCurrentSetId =
+        currentOrdinal >= 0 && currentOrdinal < replacement.sets.length
+        ? replacement.sets[currentOrdinal].id
+        : null;
     return _transitionFrom(
       active,
       TrainingSessionEvent.replaceExercise,
       currentExerciseId: replacement.exerciseId,
-      clearCurrentSetId: true,
+      currentSetId: mappedCurrentSetId,
+      clearCurrentSetId: mappedCurrentSetId == null,
     );
   }
 
@@ -400,7 +417,9 @@ class TrainingSessionEngine {
   Future<TrainingSession> finishSession() async {
     final active = await _requiredActive();
     for (final exercise in active.draft.exercises) {
-      exercise.sets.removeWhere((set) => set.completedAt == null);
+      exercise.sets.removeWhere(
+        (set) => set.completedAt == null || set.replacementPlaceholder,
+      );
     }
     active.draft.exercises.removeWhere((exercise) => exercise.sets.isEmpty);
     final finished = await _transitionFrom(
@@ -508,7 +527,9 @@ class TrainingSessionEngine {
   bool _hasPendingSets(TrainingSession draft) => draft.exercises.any(
     (exercise) =>
         exercise.status != TrainingExerciseStatus.replaced &&
-        exercise.sets.any((set) => set.completedAt == null),
+        exercise.sets.any(
+          (set) => set.completedAt == null && !set.replacementPlaceholder,
+        ),
   );
 
   SupersetSetTarget? _nextPendingTarget(ActiveTrainingSession active) {
@@ -523,7 +544,11 @@ class TrainingSessionEngine {
         : [...exercises.skip(currentIndex), ...exercises.take(currentIndex)];
     for (final exercise in ordered) {
       final set = exercise.sets
-          .where((candidate) => candidate.completedAt == null)
+          .where(
+            (candidate) =>
+                candidate.completedAt == null &&
+                !candidate.replacementPlaceholder,
+          )
           .firstOrNull;
       if (exercise.exerciseId != null && set?.id != null) {
         return SupersetSetTarget(

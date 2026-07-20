@@ -99,7 +99,10 @@ class TrainingQuickStartCard extends StatelessWidget {
             const Divider(height: 1, color: Color(0xFFF0F1F2)),
             TrainingNestedActionRow(label: '查看训练历史', onTap: onViewHistory),
             const Divider(height: 1, color: Color(0xFFF0F1F2)),
-            TrainingNestedActionRow(label: '管理训练模板', onTap: onManageTemplates),
+            TrainingNestedActionRow(
+              label: '创建 / 管理训练方案',
+              onTap: onManageTemplates,
+            ),
           ],
         ),
       ),

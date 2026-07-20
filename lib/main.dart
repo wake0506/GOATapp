@@ -30,9 +30,12 @@ import 'features/tracking/weight_picker_sheet.dart';
 import 'features/training/exercise_time.dart';
 import 'features/training/training_page.dart';
 import 'features/training/domain/active_training_session.dart';
-import 'features/training/domain/training_session_state.dart';
 import 'features/training/pages/active_training_page.dart';
+import 'features/training/services/training_draft_factory.dart';
 import 'features/training/services/training_session_engine.dart';
+import 'features/training/services/training_template_store.dart';
+import 'features/training/widgets/training_setup_sheet.dart';
+import 'features/training/widgets/training_template_manager_sheet.dart';
 import 'features/home/home_page.dart';
 import 'widgets/goat_page_header.dart';
 import 'features/water/water_tracking_page.dart';
@@ -801,15 +804,13 @@ class _MainTabControllerState extends State<MainTabController>
       onResumeTraining: _activeTrainingSession == null
           ? null
           : _openActiveTraining,
-      onStartTraining: () =>
-          _startFastTraining(name: '自主训练', exerciseName: '杠铃平板卧推'),
+      onStartTraining: _showTrainingSetup,
       onUsePplTemplate: () =>
           _startFastTraining(name: 'PPL-推力日', exerciseName: '杠铃平板卧推'),
       onUseFullBodyTemplate: () =>
           _startFastTraining(name: '全身循环燃脂', exerciseName: '杠铃深蹲'),
       onViewHistory: _showTrainingHistorySheet,
-      onManageTemplates: () =>
-          _showAddTrainingSessionSheet(viewDateStr, initialName: '自定义训练'),
+      onManageTemplates: _showTrainingTemplateManager,
     );
   }
 
@@ -822,16 +823,54 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
-  Future<void> _startFastTraining({
-    required String name,
-    required String exerciseName,
-  }) async {
+  TrainingTemplateStore? _localTrainingTemplateStore() {
+    final storage = _storage;
+    if (storage == null) return null;
+    return TrainingTemplateStore(
+      preferences: storage.prefs,
+      namespace: _activeNamespace,
+    );
+  }
+
+  Future<void> _showTrainingSetup() async {
     if (_activeTrainingSession != null) {
       _openActiveTraining();
       return;
     }
-    final repository = _localTrainingRepository();
-    if (repository == null) return;
+    final selection = await TrainingSetupSheet.show(
+      context,
+      catalog: exerciseCatalog,
+    );
+    if (selection == null || !mounted) return;
+    await _startTraining(
+      name: selection.sessionName,
+      exercises: selection.exercises,
+    );
+  }
+
+  Future<void> _showTrainingTemplateManager() async {
+    final store = _localTrainingTemplateStore();
+    if (store == null) return;
+    final template = await TrainingTemplateManagerSheet.show(
+      context,
+      catalog: exerciseCatalog,
+      store: store,
+    );
+    if (template == null || !mounted) return;
+    final exercises = template.resolveExercises(exerciseCatalog);
+    if (exercises.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('该方案中没有可用动作')));
+      return;
+    }
+    await _startTraining(name: template.name, exercises: exercises);
+  }
+
+  Future<void> _startFastTraining({
+    required String name,
+    required String exerciseName,
+  }) async {
     ExerciseDefinition? definition;
     for (final exercise in exerciseCatalog) {
       if (exercise.name == exerciseName) {
@@ -841,26 +880,26 @@ class _MainTabControllerState extends State<MainTabController>
     }
     final selectedDefinition = definition;
     if (selectedDefinition == null) return;
+    await _startTraining(name: name, exercises: [selectedDefinition]);
+  }
+
+  Future<void> _startTraining({
+    required String name,
+    required List<ExerciseDefinition> exercises,
+  }) async {
+    if (_activeTrainingSession != null) {
+      _openActiveTraining();
+      return;
+    }
+    if (exercises.isEmpty) return;
+    final repository = _localTrainingRepository();
+    if (repository == null) return;
     final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    final draft = TrainingSession(
+    final draft = const TrainingDraftFactory().create(
       id: timestamp,
       name: name,
       date: viewDateStr,
-      exercises: [
-        TrainingExercise(
-          exerciseId: selectedDefinition.id,
-          exerciseName: selectedDefinition.name,
-          bodyPart: selectedDefinition.bodyPart,
-          orderIndex: 0,
-          sets: List.generate(
-            4,
-            (index) => SetRecord(
-              id: '$timestamp-${selectedDefinition.id}-${index + 1}',
-              setType: TrainingSetType.working,
-            ),
-          ),
-        ),
-      ],
+      exercises: exercises,
     );
     try {
       final active = await TrainingSessionEngine(
@@ -1026,10 +1065,7 @@ class _MainTabControllerState extends State<MainTabController>
                     ),
                     onSelected: (val) {
                       if (val == 'edit')
-                        _showAddTrainingSessionSheet(
-                          session.date,
-                          existingSession: session,
-                        );
+                        _showRenameTrainingSessionSheet(session);
                       if (val == 'delete') {
                         setState(() => allTrainingSessions.remove(session));
                         _saveData();
@@ -1222,15 +1258,9 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
-  // 🌟 修复后的方法：支持可选的 existingSession 参数
-  void _showAddTrainingSessionSheet(
-    String dateStr, {
-    TrainingSession? existingSession,
-    String? initialName,
-  }) {
-    // 如果是编辑模式，默认填入旧名称；否则显示默认提示
+  void _showRenameTrainingSessionSheet(TrainingSession existingSession) {
     final TextEditingController nameController = TextEditingController(
-      text: existingSession?.name ?? initialName ?? "",
+      text: existingSession.name,
     );
 
     showModalBottomSheet(
@@ -1253,7 +1283,7 @@ class _MainTabControllerState extends State<MainTabController>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                existingSession == null ? "开启新训练" : "重命名训练",
+                "重命名训练",
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -1280,21 +1310,7 @@ class _MainTabControllerState extends State<MainTabController>
                   onPressed: () {
                     if (nameController.text.isEmpty) return;
                     setState(() {
-                      if (existingSession != null) {
-                        // 🌟 编辑模式：更新名字
-                        existingSession.name = nameController.text;
-                      } else {
-                        // 🌟 新增模式：创建新课
-                        allTrainingSessions.add(
-                          TrainingSession(
-                            id: DateTime.now().millisecondsSinceEpoch
-                                .toString(),
-                            name: nameController.text,
-                            date: dateStr,
-                            exercises: [],
-                          ),
-                        );
-                      }
+                      existingSession.name = nameController.text;
                     });
                     Navigator.pop(dialogContext);
                     _saveData(); // 保存到本地/云端
@@ -1304,7 +1320,7 @@ class _MainTabControllerState extends State<MainTabController>
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: Text(
-                    existingSession == null ? "创建" : "保存",
+                    "保存",
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,

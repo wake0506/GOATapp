@@ -81,11 +81,9 @@ class TrainingSessionStateMachine {
       (
         TrainingSessionState.setCompleted,
         TrainingSessionEvent.replaceExercise,
-      ) ||
-      (
-        TrainingSessionState.resting,
-        TrainingSessionEvent.replaceExercise,
       ) => TrainingSessionState.readyForNextSet,
+      (TrainingSessionState.resting, TrainingSessionEvent.replaceExercise) =>
+        TrainingSessionState.resting,
       (TrainingSessionState.preparing, TrainingSessionEvent.replaceExercise) ||
       (
         TrainingSessionState.readyForNextSet,

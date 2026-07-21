@@ -670,9 +670,14 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
 
   Future<void> _applyRestDuration(int duration) async {
     final set = _set;
-    if (set?.id == null) return;
+    final exercise = _exercise;
+    if (set?.id == null || exercise?.exerciseId == null) return;
     try {
-      await _updateSet(restSeconds: duration);
+      final exerciseUpdated = await widget.engine.updateExerciseRestDuration(
+        exerciseId: exercise!.exerciseId!,
+        durationSeconds: duration,
+      );
+      _setSession(exerciseUpdated);
       final updated = await widget.engine.updateRestDuration(
         durationSeconds: duration,
       );
@@ -811,10 +816,10 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           .clamp(1, 9999);
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) => TrainingCompletionPage(
+          builder: (completionContext) => TrainingCompletionPage(
             session: completed,
             durationMinutes: minutes,
-            onDone: () => Navigator.of(context).pop(),
+            onDone: () => Navigator.of(completionContext).pop(),
           ),
         ),
       );

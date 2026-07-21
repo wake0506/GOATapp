@@ -66,23 +66,25 @@ class TrainingPageViewModel {
           !sessionDate.isAfter(businessDay);
     });
 
-    final volumeByGroup = <String, double>{
+    final setsByGroup = <String, double>{
       '胸部': 0,
       '背部': 0,
       '腿部': 0,
       '肩部': 0,
       '手臂': 0,
+      '核心': 0,
+      '臀部': 0,
+      '全身/体能': 0,
     };
     for (final session in recentSessions) {
       for (final exercise in session.exercises) {
         final group = _canonicalMuscleGroup(exercise.bodyPart);
         if (group != null) {
-          volumeByGroup[group] =
-              (volumeByGroup[group] ?? 0) + exercise.totalVolume;
+          setsByGroup[group] = (setsByGroup[group] ?? 0) + exercise.sets.length;
         }
       }
     }
-    final peakLoad = volumeByGroup.values.fold<double>(
+    final peakLoad = setsByGroup.values.fold<double>(
       0,
       (peak, value) => value > peak ? value : peak,
     );
@@ -92,6 +94,9 @@ class TrainingPageViewModel {
       '腿部': 'Legs',
       '肩部': 'Shoulders',
       '手臂': 'Arms',
+      '核心': 'Core',
+      '臀部': 'Glutes',
+      '全身/体能': 'Full Body',
     };
 
     return TrainingPageViewModel(
@@ -110,7 +115,7 @@ class TrainingPageViewModel {
               englishLabel: entry.value,
               value: peakLoad == 0
                   ? 0
-                  : ((volumeByGroup[entry.key] ?? 0) / peakLoad * 100)
+                  : ((setsByGroup[entry.key] ?? 0) / peakLoad * 100)
                         .clamp(0, 100)
                         .toDouble(),
             ),
@@ -161,6 +166,9 @@ class TrainingPageViewModel {
     if (value.contains('手臂') || value.contains('二头') || value.contains('三头')) {
       return '手臂';
     }
+    if (value.contains('核心') || value.contains('腹')) return '核心';
+    if (value.contains('臀')) return '臀部';
+    if (value.contains('全身') || value.contains('体能')) return '全身/体能';
     return null;
   }
 

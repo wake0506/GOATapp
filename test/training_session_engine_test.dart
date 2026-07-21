@@ -159,6 +159,39 @@ void main() {
     });
 
     test(
+      'a new set inherits weight and reps from the previous completed set',
+      () async {
+        final repository = InMemoryTrainingRepository();
+        final engine = TrainingSessionEngine(
+          repository: repository,
+          clock: () => now,
+        );
+        final session = draft();
+        session.exercises.single.sets.add(SetRecord(id: 'set-2'));
+        await engine.startSession(
+          activeSessionId: 'active-copy',
+          draft: session,
+        );
+        await engine.confirmSession();
+        await engine.startSet(
+          exerciseId: 'bench_press_barbell',
+          setId: 'set-1',
+        );
+        await engine.updateSet(setId: 'set-1', weight: 72.5, reps: 9);
+        await engine.completeSet(setId: 'set-1');
+        await engine.nextSet();
+
+        final next = await engine.startSet(
+          exerciseId: 'bench_press_barbell',
+          setId: 'set-2',
+        );
+
+        expect(next.draft.exercises.single.sets[1].weight, 72.5);
+        expect(next.draft.exercises.single.sets[1].reps, 9);
+      },
+    );
+
+    test(
       'rest recovery uses absolute time and expires into ready state',
       () async {
         final storage = await LocalStorageService.create();
@@ -240,6 +273,36 @@ void main() {
       final expired = await engine.restore();
       expect(expired?.state, TrainingSessionState.readyForNextSet);
       expect(expired?.rest, isNull);
+    });
+
+    test('exercise rest duration updates every set in that exercise', () async {
+      final session = active(
+        state: TrainingSessionState.resting,
+        rest: RestState(
+          setId: 'set-1',
+          restStartedAt: now,
+          restDurationSeconds: 90,
+        ),
+      );
+      session.draft.exercises.single.sets.addAll([
+        SetRecord(id: 'set-2'),
+        SetRecord(id: 'set-3'),
+      ]);
+      final repository = InMemoryTrainingRepository(activeSession: session);
+      final engine = TrainingSessionEngine(
+        repository: repository,
+        clock: () => now,
+      );
+
+      final updated = await engine.updateExerciseRestDuration(
+        exerciseId: 'bench_press_barbell',
+        durationSeconds: 150,
+      );
+
+      expect(
+        updated.draft.exercises.single.sets.map((set) => set.restSeconds),
+        everyElement(150),
+      );
     });
 
     test(

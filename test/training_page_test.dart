@@ -113,6 +113,31 @@ void main() {
     expect(viewModel.personalBests.first.weight, 80);
   });
 
+  test('all catalog body parts contribute to the seven-day load summary', () {
+    const bodyParts = ['胸部', '背部', '腿部', '肩部', '手臂', '核心', '臀部', '全身/体能'];
+    final session = TrainingSession(
+      id: 'all-groups',
+      name: '全身训练',
+      date: '2026-07-14',
+      exercises: [
+        for (final bodyPart in bodyParts)
+          TrainingExercise(
+            exerciseName: '$bodyPart动作',
+            bodyPart: bodyPart,
+            sets: [SetRecord(reps: 10)],
+          ),
+      ],
+    );
+
+    final viewModel = TrainingPageViewModel.fromSessions(
+      sessions: [session],
+      businessDate: '2026-07-14',
+    );
+
+    expect(viewModel.muscleLoads.map((load) => load.label), bodyParts);
+    expect(viewModel.muscleLoads.map((load) => load.value), everyElement(100));
+  });
+
   testWidgets('small screen and enlarged text do not overflow', (tester) async {
     await tester.pumpWidget(
       MediaQuery(

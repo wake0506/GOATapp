@@ -105,10 +105,7 @@ class HomePage extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    HomeHeroCard(
-                      viewModel: viewModel,
-                      onEditTarget: onEditTarget,
-                    ),
+                    HomeHeroCard(viewModel: viewModel),
                     const SizedBox(height: 12),
                     if (showAiCard) ...[
                       HomeAiCard(

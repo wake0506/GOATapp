@@ -146,6 +146,7 @@ void main() {
       buildHome(targetKcal: 0, onEditTarget: () => editCount++),
     );
 
+    expect(find.byTooltip('编辑今日目标'), findsOneWidget);
     await tester.tap(find.byTooltip('编辑今日目标').first);
     expect(editCount, 1);
     expect(tester.takeException(), isNull);

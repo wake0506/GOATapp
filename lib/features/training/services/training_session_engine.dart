@@ -228,6 +228,26 @@ class TrainingSessionEngine {
     return updated;
   }
 
+  Future<ActiveTrainingSession> updateExerciseRestDuration({
+    required String exerciseId,
+    required int durationSeconds,
+  }) async {
+    if (durationSeconds < 0) {
+      throw ArgumentError.value(durationSeconds, 'durationSeconds');
+    }
+    final active = await _requiredActive();
+    final exercise = active.draft.exercises
+        .where((candidate) => candidate.exerciseId == exerciseId)
+        .firstOrNull;
+    if (exercise == null) {
+      throw StateError('Exercise $exerciseId was not found in the draft.');
+    }
+    for (final set in exercise.sets) {
+      if (!set.replacementPlaceholder) set.restSeconds = durationSeconds;
+    }
+    return _saveDraftChange(active);
+  }
+
   Future<ActiveTrainingSession> skipRest() =>
       _transition(TrainingSessionEvent.skipRest, clearRest: true);
 
@@ -467,6 +487,15 @@ class TrainingSessionEngine {
     bool clearPausedAt = false,
     bool clearResumeState = false,
   }) async {
+    if (event == TrainingSessionEvent.startSet &&
+        currentExerciseId != null &&
+        currentSetId != null) {
+      _copyPreviousSetPerformance(
+        active.draft,
+        exerciseId: currentExerciseId,
+        setId: currentSetId,
+      );
+    }
     final transition = _stateMachine.transition(
       state: active.state,
       event: event,
@@ -523,6 +552,32 @@ class TrainingSessionEngine {
       draft.exercises
           .where((exercise) => exercise.sets.any((set) => set.id == setId))
           .firstOrNull;
+
+  void _copyPreviousSetPerformance(
+    TrainingSession draft, {
+    required String exerciseId,
+    required String setId,
+  }) {
+    final exercise = draft.exercises
+        .where((candidate) => candidate.exerciseId == exerciseId)
+        .firstOrNull;
+    if (exercise == null) return;
+    final targetIndex = exercise.sets.indexWhere((set) => set.id == setId);
+    if (targetIndex <= 0) return;
+    final target = exercise.sets[targetIndex];
+    final previous = exercise.sets
+        .take(targetIndex)
+        .where(
+          (set) =>
+              set.completedAt != null &&
+              !set.replacementPlaceholder &&
+              set.resolvedSetType == target.resolvedSetType,
+        )
+        .lastOrNull;
+    if (previous == null) return;
+    if (target.weight == 0) target.weight = previous.weight;
+    if (target.reps == 0) target.reps = previous.reps;
+  }
 
   bool _hasPendingSets(TrainingSession draft) => draft.exercises.any(
     (exercise) =>

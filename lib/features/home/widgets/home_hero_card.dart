@@ -4,14 +4,9 @@ import '../models/home_dashboard_view_model.dart';
 import 'macro_half_ring.dart';
 
 class HomeHeroCard extends StatelessWidget {
-  const HomeHeroCard({
-    super.key,
-    required this.viewModel,
-    required this.onEditTarget,
-  });
+  const HomeHeroCard({super.key, required this.viewModel});
 
   final HomeDashboardViewModel viewModel;
-  final VoidCallback onEditTarget;
 
   @override
   Widget build(BuildContext context) {
@@ -61,16 +56,6 @@ class HomeHeroCard extends StatelessWidget {
                 ),
               ),
               Expanded(flex: 2, child: _NetMetric(value: viewModel.netKcal)),
-              IconButton(
-                tooltip: '编辑今日目标',
-                onPressed: onEditTarget,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(
-                  Icons.tune_rounded,
-                  color: Color(0xFF008C8C),
-                  size: 20,
-                ),
-              ),
             ],
           ),
           Align(

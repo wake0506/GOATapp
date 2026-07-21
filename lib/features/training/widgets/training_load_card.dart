@@ -50,7 +50,7 @@ class TrainingLoadCard extends StatelessWidget {
           LayoutBuilder(
             builder: (context, constraints) => SizedBox(
               width: constraints.maxWidth,
-              height: 160,
+              height: loads.length * 31.0,
               child: CustomPaint(painter: MuscleLoadChartPainter(loads)),
             ),
           ),

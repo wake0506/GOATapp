@@ -37,6 +37,7 @@ import 'features/training/services/training_template_store.dart';
 import 'features/training/widgets/training_setup_sheet.dart';
 import 'features/training/widgets/training_template_manager_sheet.dart';
 import 'features/home/home_page.dart';
+import 'features/history/widgets/history_calendar_day.dart';
 import 'widgets/goat_page_header.dart';
 import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
@@ -2951,71 +2952,13 @@ class _MainTabControllerState extends State<MainTabController>
       bool hasTraining = trainingDates.contains(dayStr);
 
       dayWidgets.add(
-        GestureDetector(
+        HistoryCalendarDay(
+          day: i,
+          dateKey: dayStr,
+          isSelected: isSelected,
+          hasRecord: hasRecord,
+          hasTraining: hasTraining,
           onTap: () => setState(() => viewDateStr = dayStr),
-          child: Container(
-            margin: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? GoatApp.marsGreen
-                  : (hasRecord
-                        ? GoatApp.marsGreen.withOpacity(0.05)
-                        : Colors.transparent),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // 数字稍微往上提一点，给下面的大对勾留空间
-                Positioned(
-                  top: 15,
-                  child: Text(
-                    i.toString(),
-                    style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black87,
-                      fontWeight: isSelected
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                // 🌟 大号包裹式对勾
-                if (hasRecord)
-                  Positioned(
-                    bottom: 8,
-                    child: Transform.scale(
-                      scale: 1.6, // 放大对勾
-                      child: Icon(
-                        Icons.check,
-                        size: 15,
-                        color: isSelected
-                            ? Colors.white.withOpacity(0.7)
-                            : GoatApp.marsGreen.withOpacity(0.8),
-                      ),
-                    ),
-                  ),
-
-                if (hasTraining)
-                  Positioned(
-                    bottom: 8,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected
-                              ? Colors.white
-                              : Colors.redAccent.withOpacity(0.8),
-                          width: 1.5,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
         ),
       );
     }

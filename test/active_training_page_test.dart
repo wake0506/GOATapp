@@ -472,7 +472,7 @@ void main() {
     expect(find.text('休息已结束'), findsOneWidget);
   });
 
-  testWidgets('rest duration sheet applies preset to timer and current set', (
+  testWidgets('rest duration sheet applies preset to timer and every exercise set', (
     tester,
   ) async {
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -495,8 +495,64 @@ void main() {
 
     final active = await setup.repository.loadActiveSession();
     expect(active?.rest?.restDurationSeconds, 120);
-    expect(active?.draft.exercises.single.sets.first.restSeconds, 120);
+    expect(
+      active?.draft.exercises.single.sets.map((set) => set.restSeconds),
+      everyElement(120),
+    );
   });
+
+  testWidgets(
+    'completion done exits back to the page below the training flow',
+    (tester) async {
+      final repository = InMemoryTrainingRepository();
+      final engine = TrainingSessionEngine(
+        repository: repository,
+        clock: () => now,
+      );
+      final singleSetDraft = draft()..exercises.single.sets.removeLast();
+      final active = await engine.startSession(
+        activeSessionId: 'active-finish',
+        draft: singleSetDraft,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (hostContext) => Scaffold(
+              body: TextButton(
+                onPressed: () => Navigator.of(hostContext).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ActiveTrainingPage(
+                      initialSession: active,
+                      engine: engine,
+                      repository: repository,
+                      catalog: exerciseCatalog,
+                      onSessionChanged: (_) {},
+                      onFinished: (_) async {},
+                      clock: () => now,
+                    ),
+                  ),
+                ),
+                child: const Text('打开训练'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开训练'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('training-complete-set')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('training-complete-set')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('结束训练'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TrainingCompletionPage), findsOneWidget);
+      await tester.tap(find.byKey(const Key('training-completion-done')));
+      await tester.pumpAndSettle();
+      expect(find.text('打开训练'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'resume card and completion screen expose their primary actions',

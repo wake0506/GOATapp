@@ -1,5 +1,6 @@
 import '../../../exercise_catalog.dart';
 import '../../../models/training.dart';
+import '../../../models/progression_target.dart';
 import '../domain/training_session_state.dart';
 
 class TrainingDraftFactory {
@@ -11,6 +12,7 @@ class TrainingDraftFactory {
     required String date,
     required List<ExerciseDefinition> exercises,
     int setsPerExercise = 4,
+    Map<String, ProgressionTarget> progressionTargets = const {},
   }) {
     final seenExerciseIds = <String>{};
     final uniqueExercises = exercises
@@ -31,6 +33,8 @@ class TrainingDraftFactory {
             exerciseName: uniqueExercises[exerciseIndex].name,
             bodyPart: uniqueExercises[exerciseIndex].bodyPart,
             orderIndex: exerciseIndex,
+            progressionTarget:
+                progressionTargets[uniqueExercises[exerciseIndex].id],
             sets: [
               for (var setIndex = 0; setIndex < setsPerExercise; setIndex++)
                 SetRecord(

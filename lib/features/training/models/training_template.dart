@@ -1,15 +1,21 @@
 import '../../../exercise_catalog.dart';
+import '../../../models/progression_target.dart';
 
 class TrainingTemplate {
   const TrainingTemplate({
     required this.id,
     required this.name,
     required this.exerciseIds,
+    this.progressionTargets = const {},
   });
 
   final String id;
   final String name;
   final List<String> exerciseIds;
+  final Map<String, ProgressionTarget> progressionTargets;
+
+  ProgressionTarget? targetFor(String exerciseId) =>
+      progressionTargets[exerciseId];
 
   List<ExerciseDefinition> resolveExercises(
     Iterable<ExerciseDefinition> catalog,
@@ -27,9 +33,23 @@ class TrainingTemplate {
     'id': id,
     'name': name,
     'exerciseIds': exerciseIds,
+    'progressionTargets': progressionTargets.map(
+      (exerciseId, target) => MapEntry(exerciseId, target.toJson()),
+    ),
   };
 
   factory TrainingTemplate.fromJson(Map<String, dynamic> json) {
+    final rawTargets = json['progressionTargets'];
+    final targets = <String, ProgressionTarget>{};
+    if (rawTargets is Map) {
+      for (final entry in rawTargets.entries) {
+        final exerciseId = entry.key.toString();
+        final target = ProgressionTarget.tryFromJson(entry.value);
+        if (exerciseId.isNotEmpty && target != null) {
+          targets[exerciseId] = target;
+        }
+      }
+    }
     return TrainingTemplate(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -37,6 +57,7 @@ class TrainingTemplate {
           .map((value) => value.toString())
           .where((value) => value.isNotEmpty)
           .toList(growable: false),
+      progressionTargets: Map.unmodifiable(targets),
     );
   }
 }

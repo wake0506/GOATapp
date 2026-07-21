@@ -437,6 +437,14 @@ class _TrainingTemplateEditorSheetState
                             exerciseIds: List.unmodifiable(
                               _selectedExerciseIds,
                             ),
+                            progressionTargets: Map.unmodifiable({
+                              for (final exerciseId in _selectedExerciseIds)
+                                if (widget.existing?.targetFor(exerciseId) !=
+                                    null)
+                                  exerciseId: widget.existing!.targetFor(
+                                    exerciseId,
+                                  )!,
+                            }),
                           ),
                         );
                       }

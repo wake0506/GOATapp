@@ -1,4 +1,5 @@
 import 'json_value.dart';
+import 'progression_target.dart';
 import '../features/training/domain/training_session_state.dart';
 
 class SetRecord {
@@ -99,6 +100,7 @@ class TrainingExercise {
   TrainingExerciseStatus? status;
   String? substitutedFromExerciseId;
   String? supersetGroupId;
+  ProgressionTarget? progressionTarget;
 
   TrainingExercise({
     this.exerciseId,
@@ -109,6 +111,7 @@ class TrainingExercise {
     this.status,
     this.substitutedFromExerciseId,
     this.supersetGroupId,
+    this.progressionTarget,
   });
 
   double get totalVolume => sets.fold(0, (sum, set) => sum + set.setVolume);
@@ -122,26 +125,27 @@ class TrainingExercise {
     'status': status?.storageValue,
     'substitutedFromExerciseId': substitutedFromExerciseId,
     'supersetGroupId': supersetGroupId,
+    'progressionTarget': progressionTarget?.toJson(),
   };
 
-  factory TrainingExercise.fromJson(Map<String, dynamic> json) =>
-      TrainingExercise(
-        exerciseId: _nullableString(json['exerciseId']),
-        exerciseName: stringValue(json['exerciseName'], '未命名动作'),
-        bodyPart: stringValue(json['bodyPart'], '全身'),
-        sets: (json['sets'] as List<dynamic>? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(SetRecord.fromJson)
-            .toList(),
-        orderIndex: json['orderIndex'] is num
-            ? intValue(json['orderIndex'])
-            : null,
-        status: TrainingExerciseStatusCodec.fromStorage(json['status']),
-        substitutedFromExerciseId: _nullableString(
-          json['substitutedFromExerciseId'],
-        ),
-        supersetGroupId: _nullableString(json['supersetGroupId']),
-      );
+  factory TrainingExercise.fromJson(
+    Map<String, dynamic> json,
+  ) => TrainingExercise(
+    exerciseId: _nullableString(json['exerciseId']),
+    exerciseName: stringValue(json['exerciseName'], '未命名动作'),
+    bodyPart: stringValue(json['bodyPart'], '全身'),
+    sets: (json['sets'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(SetRecord.fromJson)
+        .toList(),
+    orderIndex: json['orderIndex'] is num ? intValue(json['orderIndex']) : null,
+    status: TrainingExerciseStatusCodec.fromStorage(json['status']),
+    substitutedFromExerciseId: _nullableString(
+      json['substitutedFromExerciseId'],
+    ),
+    supersetGroupId: _nullableString(json['supersetGroupId']),
+    progressionTarget: ProgressionTarget.tryFromJson(json['progressionTarget']),
+  );
 }
 
 String? _nullableString(Object? value) {

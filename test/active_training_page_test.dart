@@ -472,34 +472,35 @@ void main() {
     expect(find.text('休息已结束'), findsOneWidget);
   });
 
-  testWidgets('rest duration sheet applies preset to timer and every exercise set', (
-    tester,
-  ) async {
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.binding.setSurfaceSize(const Size(390, 844));
-    final setup = await createSession(withHistory: false);
-    await tester.pumpWidget(
-      page(
-        active: setup.active,
-        engine: setup.engine,
-        repository: setup.repository,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('training-complete-set')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('rest-duration-button')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('120 秒'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'rest duration sheet applies preset to timer and every exercise set',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      final setup = await createSession(withHistory: false);
+      await tester.pumpWidget(
+        page(
+          active: setup.active,
+          engine: setup.engine,
+          repository: setup.repository,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('training-complete-set')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('rest-duration-button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('120 秒'));
+      await tester.pumpAndSettle();
 
-    final active = await setup.repository.loadActiveSession();
-    expect(active?.rest?.restDurationSeconds, 120);
-    expect(
-      active?.draft.exercises.single.sets.map((set) => set.restSeconds),
-      everyElement(120),
-    );
-  });
+      final active = await setup.repository.loadActiveSession();
+      expect(active?.rest?.restDurationSeconds, 120);
+      expect(
+        active?.draft.exercises.single.sets.map((set) => set.restSeconds),
+        everyElement(120),
+      );
+    },
+  );
 
   testWidgets(
     'completion done exits back to the page below the training flow',

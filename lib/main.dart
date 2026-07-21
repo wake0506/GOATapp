@@ -17,6 +17,7 @@ import 'models/exercise_record.dart';
 import 'models/food_item.dart';
 import 'models/statistics_period.dart';
 import 'models/training.dart';
+import 'models/progression_target.dart';
 import 'models/water_intake_record.dart';
 import 'models/app_snapshot.dart';
 import 'models/parsed_diet_item.dart';
@@ -865,7 +866,11 @@ class _MainTabControllerState extends State<MainTabController>
       ).showSnackBar(const SnackBar(content: Text('该方案中没有可用动作')));
       return;
     }
-    await _startTraining(name: template.name, exercises: exercises);
+    await _startTraining(
+      name: template.name,
+      exercises: exercises,
+      progressionTargets: template.progressionTargets,
+    );
   }
 
   Future<void> _startFastTraining({
@@ -887,6 +892,7 @@ class _MainTabControllerState extends State<MainTabController>
   Future<void> _startTraining({
     required String name,
     required List<ExerciseDefinition> exercises,
+    Map<String, ProgressionTarget> progressionTargets = const {},
   }) async {
     if (_activeTrainingSession != null) {
       _openActiveTraining();
@@ -901,6 +907,7 @@ class _MainTabControllerState extends State<MainTabController>
       name: name,
       date: viewDateStr,
       exercises: exercises,
+      progressionTargets: progressionTargets,
     );
     try {
       final active = await TrainingSessionEngine(

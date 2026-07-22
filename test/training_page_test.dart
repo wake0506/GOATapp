@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goat_app/features/training/models/training_page_view_model.dart';
+import 'package:goat_app/features/training/domain/training_session_state.dart';
 import 'package:goat_app/features/training/training_page.dart';
 import 'package:goat_app/models/training.dart';
 
@@ -12,6 +13,7 @@ void main() {
     VoidCallback? onFullBody,
     VoidCallback? onHistory,
     VoidCallback? onTemplates,
+    VoidCallback? onWeeklyReview,
   }) {
     return MaterialApp(
       home: TrainingPage(
@@ -22,6 +24,7 @@ void main() {
         onUseFullBodyTemplate: onFullBody ?? () {},
         onViewHistory: onHistory ?? () {},
         onManageTemplates: onTemplates ?? () {},
+        onOpenWeeklyReview: onWeeklyReview,
       ),
     );
   }
@@ -57,11 +60,16 @@ void main() {
   testWidgets('quick start and nested entries use the existing flows', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     var startCount = 0;
     var pplCount = 0;
     var fullBodyCount = 0;
     var historyCount = 0;
     var templateCount = 0;
+    var weeklyReviewCount = 0;
     await tester.pumpWidget(
       buildPage(
         onStartTraining: () => startCount++,
@@ -69,20 +77,26 @@ void main() {
         onFullBody: () => fullBodyCount++,
         onHistory: () => historyCount++,
         onTemplates: () => templateCount++,
+        onWeeklyReview: () => weeklyReviewCount++,
       ),
     );
 
     await tester.tap(find.text('开始一次新训练'));
     await tester.tap(find.text('PPL-推力日'));
     await tester.tap(find.text('全身循环燃脂'));
+    await tester.ensureVisible(find.text('查看训练历史'));
     await tester.tap(find.text('查看训练历史'));
+    await tester.ensureVisible(find.text('创建 / 管理训练方案'));
     await tester.tap(find.text('创建 / 管理训练方案'));
+    await tester.ensureVisible(find.text('本周复盘'));
+    await tester.tap(find.text('本周复盘'));
 
     expect(startCount, 1);
     expect(pplCount, 1);
     expect(fullBodyCount, 1);
     expect(historyCount, 1);
     expect(templateCount, 1);
+    expect(weeklyReviewCount, 1);
   });
 
   testWidgets('real sessions feed status, load and personal bests', (
@@ -137,6 +151,99 @@ void main() {
     expect(viewModel.muscleLoads.map((load) => load.label), bodyParts);
     expect(viewModel.muscleLoads.map((load) => load.value), everyElement(100));
   });
+
+  test('dashboard load uses effective sets and keeps full body isolated', () {
+    final completedAt = DateTime(2026, 7, 14);
+    final session = TrainingSession(
+      id: 'effective-ui',
+      name: '有效组',
+      date: '2026-07-14',
+      exercises: [
+        TrainingExercise(
+          exerciseId: 'chest',
+          exerciseName: 'Press',
+          bodyPart: 'chest',
+          sets: [
+            SetRecord(
+              reps: 10,
+              setType: TrainingSetType.warmup,
+              completedAt: completedAt,
+            ),
+            SetRecord(
+              reps: 10,
+              setType: TrainingSetType.working,
+              completedAt: completedAt,
+            ),
+          ],
+        ),
+        TrainingExercise(
+          exerciseId: 'full',
+          exerciseName: 'Burpee',
+          bodyPart: 'fullBody',
+          sets: [
+            SetRecord(
+              reps: 10,
+              setType: TrainingSetType.working,
+              completedAt: completedAt,
+            ),
+          ],
+        ),
+      ],
+    );
+    final viewModel = TrainingPageViewModel.fromSessions(
+      sessions: [session],
+      businessDate: '2026-07-14',
+    );
+    expect(viewModel.muscleLoads.map((load) => load.label), ['胸部', '全身/体能']);
+    expect(viewModel.muscleLoads.map((load) => load.effectiveSets), [1, 1]);
+  });
+
+  testWidgets('legacy effective sets remain visible with a light explanation', (
+    tester,
+  ) async {
+    final legacy = TrainingSession(
+      id: 'legacy-ui',
+      name: 'Legacy',
+      date: '2026-07-14',
+      exercises: [
+        TrainingExercise(
+          exerciseName: 'Legacy press',
+          bodyPart: 'chest',
+          sets: [SetRecord(reps: 10)],
+        ),
+      ],
+    );
+    await tester.pumpWidget(buildPage(sessions: [legacy]));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('training-load-card')),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('包含部分历史训练记录'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('effective-sets-info')));
+    await tester.pumpAndSettle();
+    expect(find.text('有效训练组'), findsOneWidget);
+    expect(find.textContaining('不包含热身'), findsOneWidget);
+  });
+
+  for (final size in const [Size(360, 800), Size(390, 844), Size(412, 915)]) {
+    testWidgets('effective set area fits ${size.width}x${size.height}', (
+      tester,
+    ) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(buildPage());
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('training-load-card')),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.byKey(const Key('training-load-card')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('small screen and enlarged text do not overflow', (tester) async {
     await tester.pumpWidget(

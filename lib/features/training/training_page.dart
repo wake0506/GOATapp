@@ -10,6 +10,7 @@ import 'widgets/training_load_card.dart';
 import 'widgets/training_page_header.dart';
 import 'widgets/training_quick_start_card.dart';
 import 'widgets/training_status_card.dart';
+import 'widgets/weekly_review_entry.dart';
 
 class TrainingPage extends StatelessWidget {
   const TrainingPage({
@@ -23,6 +24,7 @@ class TrainingPage extends StatelessWidget {
     required this.onManageTemplates,
     this.activeSession,
     this.onResumeTraining,
+    this.onOpenWeeklyReview,
   });
 
   final List<TrainingSession> sessions;
@@ -34,6 +36,7 @@ class TrainingPage extends StatelessWidget {
   final VoidCallback onManageTemplates;
   final ActiveTrainingSession? activeSession;
   final VoidCallback? onResumeTraining;
+  final VoidCallback? onOpenWeeklyReview;
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +62,10 @@ class TrainingPage extends StatelessWidget {
             ],
             const SizedBox(height: 14),
             const TrainingAiInsightCard(),
+            if (onOpenWeeklyReview != null) ...[
+              const SizedBox(height: 10),
+              WeeklyReviewEntry(onTap: onOpenWeeklyReview!),
+            ],
             const SizedBox(height: 14),
             TrainingQuickStartCard(
               onStartTraining: onStartTraining,
@@ -68,7 +75,10 @@ class TrainingPage extends StatelessWidget {
               onManageTemplates: onManageTemplates,
             ),
             const SizedBox(height: 14),
-            TrainingLoadCard(loads: viewModel.muscleLoads),
+            TrainingLoadCard(
+              loads: viewModel.muscleLoads,
+              legacyInferredSets: viewModel.legacyInferredSets,
+            ),
             const SizedBox(height: 14),
             PersonalBestCard(personalBests: viewModel.personalBests),
           ],

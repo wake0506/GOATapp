@@ -62,7 +62,7 @@ class MuscleLoadChartPainter extends CustomPainter {
       _drawText(
         canvas,
         textPainter,
-        '${load.value.round()}%',
+        '${load.effectiveSets} 组',
         const TextStyle(
           color: Color(0xFF4A4F55),
           fontSize: 10,

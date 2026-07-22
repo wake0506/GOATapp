@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../exercise_catalog.dart';
+import '../../../models/progression_target.dart';
 import '../models/training_template.dart';
 import '../services/training_template_store.dart';
+import 'progression_target_sheet.dart';
 
 const _marsGreen = Color(0xFF008C8C);
 
@@ -287,6 +289,7 @@ class _TrainingTemplateEditorSheetState
   late final TextEditingController _nameController;
   late String _bodyPart;
   late final List<String> _selectedExerciseIds;
+  late final Map<String, ProgressionTarget> _progressionTargets;
 
   @override
   void initState() {
@@ -297,6 +300,7 @@ class _TrainingTemplateEditorSheetState
         .where(catalogIds.contains)
         .toSet()
         .toList(growable: true);
+    _progressionTargets = {...?widget.existing?.progressionTargets};
     _bodyPart = _initialBodyPart();
   }
 
@@ -315,6 +319,21 @@ class _TrainingTemplateEditorSheetState
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _editTarget(ExerciseDefinition exercise) async {
+    final result = await ProgressionTargetSheet.show(
+      context,
+      initialTarget: _progressionTargets[exercise.id],
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      if (result.cleared) {
+        _progressionTargets.remove(exercise.id);
+      } else if (result.target != null) {
+        _progressionTargets[exercise.id] = result.target!;
+      }
+    });
   }
 
   @override
@@ -409,7 +428,22 @@ class _TrainingTemplateEditorSheetState
                             ? '${selectedIndex + 1}. ${exercise.name}'
                             : exercise.name,
                       ),
-                      subtitle: Text(exercise.equipment),
+                      subtitle: selected
+                          ? Row(
+                              children: [
+                                Expanded(child: Text(exercise.equipment)),
+                                TextButton(
+                                  key: Key('template-target-${exercise.id}'),
+                                  onPressed: () => _editTarget(exercise),
+                                  child: Text(
+                                    _targetLabel(
+                                      _progressionTargets[exercise.id],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Text(exercise.equipment),
                       onChanged: (checked) => setState(() {
                         if (checked == true) {
                           _selectedExerciseIds.add(exercise.id);
@@ -439,11 +473,8 @@ class _TrainingTemplateEditorSheetState
                             ),
                             progressionTargets: Map.unmodifiable({
                               for (final exerciseId in _selectedExerciseIds)
-                                if (widget.existing?.targetFor(exerciseId) !=
-                                    null)
-                                  exerciseId: widget.existing!.targetFor(
-                                    exerciseId,
-                                  )!,
+                                if (_progressionTargets[exerciseId] != null)
+                                  exerciseId: _progressionTargets[exerciseId]!,
                             }),
                           ),
                         );
@@ -466,5 +497,13 @@ class _TrainingTemplateEditorSheetState
         ),
       ),
     );
+  }
+
+  String _targetLabel(ProgressionTarget? target) {
+    if (target == null) return '未设置递进目标 ›';
+    final step = target.weightStepKg == null
+        ? ''
+        : ' · +${target.weightStepKg}kg';
+    return '${target.targetSets}×${target.targetRepMin}–${target.targetRepMax}$step ›';
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../analytics/models/weight_trend.dart';
 import '../models/home_dashboard_view_model.dart';
 
 class HomeMetricsRow extends StatelessWidget {
@@ -18,7 +19,7 @@ class HomeMetricsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final trend = viewModel.weightDelta;
+    final trend = viewModel.weightTrend;
     return Container(
       key: const Key('home-metrics-row'),
       decoration: BoxDecoration(
@@ -194,7 +195,10 @@ class HomeMetricsRow extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          _WeightTrend(delta: trend),
+                          _WeightTrend(
+                            trend: trend,
+                            fallbackDelta: viewModel.weightDelta,
+                          ),
                         ],
                       ),
                     ),
@@ -246,33 +250,66 @@ class _QuickWaterButton extends StatelessWidget {
 }
 
 class _WeightTrend extends StatelessWidget {
-  const _WeightTrend({required this.delta});
+  const _WeightTrend({required this.trend, this.fallbackDelta});
 
-  final double? delta;
+  final WeightTrend? trend;
+  final double? fallbackDelta;
 
   @override
   Widget build(BuildContext context) {
-    final value = delta;
+    final value = trend;
     if (value == null) {
+      final delta = fallbackDelta;
+      if (delta != null) {
+        if (delta.abs() < 0.005) {
+          return const Text(
+            '— 持平',
+            style: TextStyle(color: Color(0xFF788180), fontSize: 11),
+          );
+        }
+        final down = delta < 0;
+        return Text(
+          '${down ? '↓' : '↑'} ${delta.abs().toStringAsFixed(2)} kg',
+          style: TextStyle(
+            color: down ? const Color(0xFFC96A62) : const Color(0xFF3F8778),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+      }
       return const Text(
-        '暂无趋势',
+        '暂无趋势数据',
         style: TextStyle(color: Color(0xFF899291), fontSize: 11),
       );
     }
-    if (value.abs() < 0.005) {
+    if (value.sevenDayAverageKg == null) {
       return const Text(
-        '— 持平',
-        style: TextStyle(color: Color(0xFF788180), fontSize: 11),
+        '暂无趋势数据',
+        style: TextStyle(color: Color(0xFF899291), fontSize: 11),
       );
     }
-    final down = value < 0;
-    return Text(
-      '${down ? '↓' : '↑'} ${value.abs().toStringAsFixed(2)} kg',
-      style: TextStyle(
-        color: down ? const Color(0xFFC96A62) : const Color(0xFF3F8778),
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
-      ),
+    final change = value.change7dKg;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '趋势 ${value.sevenDayAverageKg!.toStringAsFixed(2)} kg',
+          style: const TextStyle(
+            color: Color(0xFF596361),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          change == null
+              ? value.readingCount == 1
+                    ? '数据仍不足'
+                    : '数据积累中'
+              : '近7天 ${change > 0 ? '+' : ''}${change.toStringAsFixed(2)} kg',
+          style: const TextStyle(color: Color(0xFF899291), fontSize: 10),
+        ),
+      ],
     );
   }
 }

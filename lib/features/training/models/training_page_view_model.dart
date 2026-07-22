@@ -1,4 +1,7 @@
 import '../../../models/training.dart';
+import '../../analytics/models/analytics_date_range.dart';
+import '../../analytics/models/effective_set_summary.dart';
+import '../../analytics/services/effective_set_calculator.dart';
 
 class TrainingStatusSummary {
   const TrainingStatusSummary({
@@ -17,11 +20,13 @@ class MuscleLoad {
     required this.label,
     required this.englishLabel,
     required this.value,
+    required this.effectiveSets,
   });
 
   final String label;
   final String englishLabel;
   final double value;
+  final int effectiveSets;
 }
 
 class PersonalBest {
@@ -43,11 +48,13 @@ class TrainingPageViewModel {
     required this.status,
     required this.muscleLoads,
     required this.personalBests,
+    required this.legacyInferredSets,
   });
 
   final TrainingStatusSummary status;
   final List<MuscleLoad> muscleLoads;
   final List<PersonalBest> personalBests;
+  final int legacyInferredSets;
 
   factory TrainingPageViewModel.fromSessions({
     required Iterable<TrainingSession> sessions,
@@ -57,47 +64,22 @@ class TrainingPageViewModel {
     final today = allSessions
         .where((session) => session.date == businessDate)
         .toList(growable: false);
-    final businessDay = DateTime.tryParse(businessDate) ?? DateTime.now();
-    final sevenDayStart = businessDay.subtract(const Duration(days: 6));
-    final recentSessions = allSessions.where((session) {
-      final sessionDate = DateTime.tryParse(session.date);
-      return sessionDate != null &&
-          !sessionDate.isBefore(sevenDayStart) &&
-          !sessionDate.isAfter(businessDay);
-    });
-
-    final setsByGroup = <String, double>{
-      '胸部': 0,
-      '背部': 0,
-      '腿部': 0,
-      '肩部': 0,
-      '手臂': 0,
-      '核心': 0,
-      '臀部': 0,
-      '全身/体能': 0,
-    };
-    for (final session in recentSessions) {
-      for (final exercise in session.exercises) {
-        final group = _canonicalMuscleGroup(exercise.bodyPart);
-        if (group != null) {
-          setsByGroup[group] = (setsByGroup[group] ?? 0) + exercise.sets.length;
-        }
-      }
-    }
-    final peakLoad = setsByGroup.values.fold<double>(
-      0,
-      (peak, value) => value > peak ? value : peak,
+    final businessDay = DateTime.tryParse(businessDate) ?? DateTime(1970);
+    final effectiveSummary = const EffectiveSetCalculator().calculate(
+      completedSessions: allSessions,
+      dateRange: AnalyticsDateRange(
+        start: businessDay.subtract(const Duration(days: 6)),
+        end: businessDay,
+      ),
     );
-    final labels = <String, String>{
-      '胸部': 'Chest',
-      '背部': 'Back',
-      '腿部': 'Legs',
-      '肩部': 'Shoulders',
-      '手臂': 'Arms',
-      '核心': 'Core',
-      '臀部': 'Glutes',
-      '全身/体能': 'Full Body',
-    };
+    final activeGroups = effectiveSummary.groups
+        .where((group) => group.effectiveSets > 0)
+        .toList(growable: false);
+    final peakLoad = activeGroups.fold<double>(
+      0,
+      (peak, group) =>
+          group.effectiveSets > peak ? group.effectiveSets.toDouble() : peak,
+    );
 
     return TrainingPageViewModel(
       status: TrainingStatusSummary(
@@ -108,14 +90,15 @@ class TrainingPageViewModel {
         durationMinutes: _durationMinutes(today),
         completedSets: _setCount(today),
       ),
-      muscleLoads: labels.entries
+      muscleLoads: activeGroups
           .map(
-            (entry) => MuscleLoad(
-              label: entry.key,
-              englishLabel: entry.value,
+            (group) => MuscleLoad(
+              label: _groupLabel(group.muscleGroup),
+              englishLabel: _groupEnglishLabel(group.muscleGroup),
+              effectiveSets: group.effectiveSets,
               value: peakLoad == 0
                   ? 0
-                  : ((setsByGroup[entry.key] ?? 0) / peakLoad * 100)
+                  : (group.effectiveSets / peakLoad * 100)
                         .clamp(0, 100)
                         .toDouble(),
             ),
@@ -126,6 +109,7 @@ class TrainingPageViewModel {
         _findPersonalBest(allSessions, '深蹲', 'Squat'),
         _findPersonalBest(allSessions, '硬拉', 'Deadlift'),
       ],
+      legacyInferredSets: effectiveSummary.legacyInferredSets,
     );
   }
 
@@ -158,19 +142,28 @@ class TrainingPageViewModel {
     return (seconds / 60).round();
   }
 
-  static String? _canonicalMuscleGroup(String value) {
-    if (value.contains('胸')) return '胸部';
-    if (value.contains('背')) return '背部';
-    if (value.contains('腿')) return '腿部';
-    if (value.contains('肩')) return '肩部';
-    if (value.contains('手臂') || value.contains('二头') || value.contains('三头')) {
-      return '手臂';
-    }
-    if (value.contains('核心') || value.contains('腹')) return '核心';
-    if (value.contains('臀')) return '臀部';
-    if (value.contains('全身') || value.contains('体能')) return '全身/体能';
-    return null;
-  }
+  static String _groupLabel(AnalyticsMuscleGroup group) => switch (group) {
+    AnalyticsMuscleGroup.chest => '胸部',
+    AnalyticsMuscleGroup.back => '背部',
+    AnalyticsMuscleGroup.legs => '腿部',
+    AnalyticsMuscleGroup.shoulders => '肩部',
+    AnalyticsMuscleGroup.arms => '手臂',
+    AnalyticsMuscleGroup.core => '核心',
+    AnalyticsMuscleGroup.glutes => '臀部',
+    AnalyticsMuscleGroup.fullBody => '全身/体能',
+  };
+
+  static String _groupEnglishLabel(AnalyticsMuscleGroup group) =>
+      switch (group) {
+        AnalyticsMuscleGroup.chest => 'Chest',
+        AnalyticsMuscleGroup.back => 'Back',
+        AnalyticsMuscleGroup.legs => 'Legs',
+        AnalyticsMuscleGroup.shoulders => 'Shoulders',
+        AnalyticsMuscleGroup.arms => 'Arms',
+        AnalyticsMuscleGroup.core => 'Core',
+        AnalyticsMuscleGroup.glutes => 'Glutes',
+        AnalyticsMuscleGroup.fullBody => 'Full Body',
+      };
 
   static PersonalBest _findPersonalBest(
     Iterable<TrainingSession> sessions,

@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import '../../../exercise_catalog.dart';
 import '../../../models/training.dart';
 import '../../../repositories/training_repository.dart';
+import '../../analytics/models/progression_recommendation.dart';
+import '../../analytics/services/progression_recommendation_engine.dart';
 import '../domain/active_training_session.dart';
 import '../domain/training_session_state.dart';
 import '../services/exercise_replacement_service.dart';
@@ -18,6 +20,7 @@ import '../widgets/rest_timer_card.dart';
 import '../widgets/set_type_selector_sheet.dart';
 import '../widgets/superset_selector_sheet.dart';
 import '../widgets/training_set_input_card.dart';
+import '../widgets/training_recommendation_card.dart';
 import '../widgets/warmup_suggestion_sheet.dart';
 import 'training_completion_page.dart';
 
@@ -49,6 +52,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
     with WidgetsBindingObserver {
   late ActiveTrainingSession _session = widget.initialSession;
   ExercisePerformance? _lastPerformance;
+  ProgressionRecommendation? _recommendation;
   bool _autofilled = false;
   bool _busy = false;
   Timer? _restTimer;
@@ -241,12 +245,28 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   Future<void> _loadLastPerformance() async {
     final exercise = _exercise;
     final set = _set;
-    if (exercise == null ||
-        set == null ||
-        set.resolvedSetType != TrainingSetType.working) {
+    if (exercise == null || set == null) {
       if (mounted) {
         setState(() {
           _lastPerformance = null;
+          _recommendation = null;
+          _autofilled = false;
+        });
+      }
+      return;
+    }
+    final history = await widget.repository.listCompletedSessions();
+    final recommendation = const ProgressionRecommendationEngine().recommend(
+      exerciseId: exercise.exerciseId ?? '',
+      exerciseName: exercise.exerciseName,
+      completedSessions: history,
+      target: exercise.progressionTarget,
+    );
+    if (set.resolvedSetType != TrainingSetType.working) {
+      if (mounted) {
+        setState(() {
+          _lastPerformance = null;
+          _recommendation = recommendation;
           _autofilled = false;
         });
       }
@@ -267,7 +287,53 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
       ),
       setOrdinal: workingOrdinal < 0 ? null : workingOrdinal,
     );
-    if (mounted) setState(() => _lastPerformance = result);
+    if (mounted) {
+      setState(() {
+        _lastPerformance = result;
+        _recommendation = recommendation;
+      });
+    }
+  }
+
+  Future<void> _applyRecommendation() async {
+    final exercise = _exercise;
+    final suggestedWeight = _recommendation?.suggestedWeightKg;
+    if (exercise?.exerciseId == null || suggestedWeight == null || _busy) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('采用这条建议？'),
+        content: Text(
+          '将当前或下一正式组重量设为 ${suggestedWeight.toStringAsFixed(1)} kg。训练方案不会改变。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('training-recommendation-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('确认采用'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final updated = await widget.engine.applySuggestedWeight(
+        exerciseId: exercise!.exerciseId!,
+        weightKg: suggestedWeight,
+      );
+      _setSession(updated);
+    } catch (error) {
+      _showSaveError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _setSession(ActiveTrainingSession value) {
@@ -1118,6 +1184,24 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
                         fontSize: 13,
                       ),
                     ),
+                  ),
+                ],
+                if (exercise.progressionTarget != null) ...[
+                  const SizedBox(height: 10),
+                  TrainingRecommendationCard(
+                    target: exercise.progressionTarget,
+                    recommendation: _recommendation,
+                    referenceWeightKg: _lastPerformance?.set.weight,
+                    onApply: _recommendation?.suggestedWeightKg == null
+                        ? null
+                        : _applyRecommendation,
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    '暂无精确递进建议 · 可在训练方案中设置目标',
+                    key: Key('training-recommendation-missing-target-inline'),
+                    style: TextStyle(color: Color(0xFF858D8B), fontSize: 11),
                   ),
                 ],
                 const SizedBox(height: 18),

@@ -1,5 +1,6 @@
 import '../../../models/consumed_record.dart';
 import '../../../models/daily_macro_stats.dart';
+import '../../analytics/models/weight_trend.dart';
 
 class HomeMealSummary {
   const HomeMealSummary({
@@ -35,6 +36,7 @@ class HomeDashboardViewModel {
     required this.weight,
     required this.previousWeight,
     required this.meals,
+    this.weightTrend,
   });
 
   final DailyMacroStats stats;
@@ -47,6 +49,7 @@ class HomeDashboardViewModel {
   final double weight;
   final double? previousWeight;
   final List<HomeMealSummary> meals;
+  final WeightTrend? weightTrend;
 
   double get netKcal => stats.kcalIn - stats.burn;
 
@@ -67,6 +70,7 @@ class HomeDashboardViewModel {
     required double weight,
     required double? previousWeight,
     required Iterable<ConsumedRecord> consumed,
+    WeightTrend? weightTrend,
   }) {
     final records = consumed.toList(growable: false);
     const mealDefinitions = [
@@ -86,6 +90,7 @@ class HomeDashboardViewModel {
       waterGoalMl: waterGoalMl,
       weight: weight,
       previousWeight: previousWeight,
+      weightTrend: weightTrend,
       meals: mealDefinitions
           .map((definition) {
             final mealRecords = records

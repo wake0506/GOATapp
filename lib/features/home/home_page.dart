@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/daily_macro_stats.dart';
 import '../../models/consumed_record.dart';
+import '../analytics/models/weight_trend.dart';
 import '../../widgets/goat_page_header.dart';
 import 'models/home_dashboard_view_model.dart';
 import 'widgets/home_ai_card.dart';
@@ -38,6 +39,7 @@ class HomePage extends StatelessWidget {
     required this.onVoiceMeal,
     required this.onOpenTraining,
     required this.onAddExercise,
+    this.weightTrend,
   });
 
   final String businessDate;
@@ -65,6 +67,7 @@ class HomePage extends StatelessWidget {
   final ValueChanged<String> onVoiceMeal;
   final VoidCallback onOpenTraining;
   final VoidCallback onAddExercise;
+  final WeightTrend? weightTrend;
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +82,7 @@ class HomePage extends StatelessWidget {
       weight: weight,
       previousWeight: previousWeight,
       consumed: consumed,
+      weightTrend: weightTrend,
     );
     return Scaffold(
       backgroundColor: const Color(0xFFF4F5F7),

@@ -7,6 +7,7 @@ import 'package:goat_app/features/training/services/exercise_replacement_service
 import 'package:goat_app/features/training/services/last_performance_resolver.dart';
 import 'package:goat_app/features/training/services/training_session_engine.dart';
 import 'package:goat_app/models/training.dart';
+import 'package:goat_app/models/progression_target.dart';
 import 'package:goat_app/repositories/in_memory_training_repository.dart';
 import 'package:goat_app/repositories/local_training_repository.dart';
 import 'package:goat_app/repositories/training_repository.dart';
@@ -417,6 +418,63 @@ void main() {
       },
     );
   });
+
+  test(
+    'applied coaching weight persists across a local repository restart',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final storage = LocalStorageService(preferences);
+      var repository = LocalTrainingRepository(
+        storage: storage,
+        namespace: 'coaching-restart',
+        clock: () => now,
+      );
+      var engine = TrainingSessionEngine(
+        repository: repository,
+        clock: () => now,
+      );
+      final session = TrainingSession(
+        id: 'coaching-draft',
+        name: 'Coaching',
+        date: '2026-07-18',
+        exercises: [
+          TrainingExercise(
+            exerciseId: 'bench',
+            exerciseName: 'Bench',
+            bodyPart: 'chest',
+            progressionTarget: const ProgressionTarget(
+              targetSets: 3,
+              targetRepMin: 8,
+              targetRepMax: 10,
+              weightStepKg: 2.5,
+            ),
+            sets: [
+              SetRecord(id: 'working-1', setType: TrainingSetType.working),
+            ],
+          ),
+        ],
+      );
+      await engine.startSession(
+        activeSessionId: 'active-coaching',
+        draft: session,
+      );
+      await engine.applySuggestedWeight(exerciseId: 'bench', weightKg: 82.5);
+
+      repository = LocalTrainingRepository(
+        storage: LocalStorageService(preferences),
+        namespace: 'coaching-restart',
+        clock: () => now,
+      );
+      engine = TrainingSessionEngine(repository: repository, clock: () => now);
+      final restored = await engine.restore();
+      expect(restored?.draft.exercises.single.sets.single.weight, 82.5);
+      expect(
+        restored?.draft.exercises.single.progressionTarget?.weightStepKg,
+        2.5,
+      );
+    },
+  );
 
   group('exercise replacement', () {
     const original = ExerciseDefinition(

@@ -38,6 +38,12 @@ import 'features/training/services/training_template_store.dart';
 import 'features/training/widgets/training_setup_sheet.dart';
 import 'features/training/widgets/training_template_manager_sheet.dart';
 import 'features/home/home_page.dart';
+import 'features/analytics/models/weight_trend.dart';
+import 'features/analytics/pages/weekly_review_page.dart';
+import 'features/analytics/services/trend_weight_calculator.dart';
+import 'features/analytics/services/weekly_nutrition_review_calculator.dart';
+import 'features/analytics/services/weekly_training_review_calculator.dart';
+import 'features/analytics/widgets/weight_trend_summary.dart';
 import 'features/history/widgets/history_calendar_day.dart';
 import 'widgets/goat_page_header.dart';
 import 'features/water/water_tracking_page.dart';
@@ -342,9 +348,6 @@ class _MainTabControllerState extends State<MainTabController>
       _activeNamespace = _storage!.namespaceForUser(_activeUserId);
       await _mergeGuestDataIfNeeded();
       await _loadLocalData();
-      if (!dailyWeight.containsKey(todayStr)) {
-        dailyWeight[todayStr] = currentWeight;
-      }
     } catch (e) {
       debugPrint('本地数据初始化失败: $e');
     } finally {
@@ -813,6 +816,7 @@ class _MainTabControllerState extends State<MainTabController>
           _startFastTraining(name: '全身循环燃脂', exerciseName: '杠铃深蹲'),
       onViewHistory: _showTrainingHistorySheet,
       onManageTemplates: _showTrainingTemplateManager,
+      onOpenWeeklyReview: _showWeeklyReviewPage,
     );
   }
 
@@ -822,6 +826,44 @@ class _MainTabControllerState extends State<MainTabController>
     return LocalTrainingRepository(
       storage: storage,
       namespace: _activeNamespace,
+    );
+  }
+
+  List<WeightRecord> _weightRecords() => dailyWeight.entries
+      .map((entry) {
+        final date = DateTime.tryParse(entry.key);
+        return date == null
+            ? null
+            : WeightRecord(recordedAt: date, weightKg: entry.value);
+      })
+      .whereType<WeightRecord>()
+      .toList(growable: false);
+
+  WeightTrend _weightTrendFor(DateTime anchorDate) =>
+      const TrendWeightCalculator().calculate(
+        records: _weightRecords(),
+        anchorDate: anchorDate,
+      );
+
+  void _showWeeklyReviewPage() {
+    final anchor = DateUtils.dateOnly(
+      DateTime.tryParse(viewDateStr) ?? DateTime.now(),
+    );
+    final weights = _weightRecords();
+    final training = const WeeklyTrainingReviewCalculator().calculate(
+      completedSessions: allTrainingSessions,
+      anchorDate: anchor,
+    );
+    final nutrition = const WeeklyNutritionReviewCalculator().calculate(
+      records: allConsumedItems,
+      weightRecords: weights,
+      anchorDate: anchor,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            WeeklyReviewPage(training: training, nutrition: nutrition),
+      ),
     );
   }
 
@@ -2627,6 +2669,7 @@ class _MainTabControllerState extends State<MainTabController>
       waterMl: _waterTotalForDate(viewDateStr),
       weight: dailyWeight[viewDateStr] ?? currentWeight,
       previousWeight: previousWeight,
+      weightTrend: _weightTrendFor(currentDate),
       consumed: consumed,
       aiContent: _currentAiTip,
       isAiLoading: _isAiTipLoading,
@@ -3265,6 +3308,10 @@ class _MainTabControllerState extends State<MainTabController>
   }
 
   Widget _buildWeightTrendChartContainer(List<DateTime> dates) {
+    final anchor = DateUtils.dateOnly(
+      DateTime.tryParse(viewDateStr) ?? DateTime.now(),
+    );
+    final trend = _weightTrendFor(anchor);
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       padding: const EdgeInsets.all(16),
@@ -3279,6 +3326,8 @@ class _MainTabControllerState extends State<MainTabController>
             '$_statisticsPeriodLabel 体重趋势',
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           ),
+          const SizedBox(height: 14),
+          WeightTrendSummary(trend: trend),
           const SizedBox(height: 20),
           SizedBox(
             height: 140,

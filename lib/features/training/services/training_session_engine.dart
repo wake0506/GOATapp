@@ -182,6 +182,51 @@ class TrainingSessionEngine {
     return next;
   }
 
+  Future<ActiveTrainingSession> applySuggestedWeight({
+    required String exerciseId,
+    required double weightKg,
+  }) async {
+    if (!weightKg.isFinite || weightKg < 0) {
+      throw ArgumentError.value(weightKg, 'weightKg');
+    }
+    final active = await _requiredActive();
+    final exercise = active.draft.exercises
+        .where((candidate) => candidate.exerciseId == exerciseId)
+        .firstOrNull;
+    if (exercise == null) {
+      throw StateError('Exercise $exerciseId was not found in the draft.');
+    }
+    SetRecord? targetSet;
+    if (active.currentSetId != null) {
+      targetSet = exercise.sets
+          .where(
+            (set) =>
+                set.id == active.currentSetId &&
+                set.completedAt == null &&
+                !set.replacementPlaceholder &&
+                _isWorkingEquivalent(set),
+          )
+          .firstOrNull;
+    }
+    targetSet ??= exercise.sets
+        .where(
+          (set) =>
+              set.completedAt == null &&
+              !set.replacementPlaceholder &&
+              _isWorkingEquivalent(set),
+        )
+        .firstOrNull;
+    if (targetSet == null) {
+      throw StateError('No pending working set can accept the suggestion.');
+    }
+    targetSet.weight = weightKg;
+    return _saveDraftChange(active);
+  }
+
+  bool _isWorkingEquivalent(SetRecord set) =>
+      set.resolvedSetType == TrainingSetType.working ||
+      set.resolvedSetType == TrainingSetType.superset;
+
   Future<ActiveTrainingSession> startRest({
     required String setId,
     required int durationSeconds,

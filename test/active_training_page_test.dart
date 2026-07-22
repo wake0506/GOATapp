@@ -101,6 +101,10 @@ void main() {
   testWidgets('autofills last performance and persists fast set controls', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final setup = await createSession();
     await tester.pumpWidget(
       page(
@@ -128,6 +132,7 @@ void main() {
     expect(set.reps, 9);
     expect(set.rir, 1);
 
+    await tester.ensureVisible(find.byKey(const Key('training-complete-set')));
     await tester.tap(find.byKey(const Key('training-complete-set')));
     await tester.pump();
     final completed = await setup.repository.loadActiveSession();

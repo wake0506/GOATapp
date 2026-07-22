@@ -4,9 +4,14 @@ import '../models/training_page_view_model.dart';
 import '../painters/muscle_load_chart_painter.dart';
 
 class TrainingLoadCard extends StatelessWidget {
-  const TrainingLoadCard({super.key, required this.loads});
+  const TrainingLoadCard({
+    super.key,
+    required this.loads,
+    this.legacyInferredSets = 0,
+  });
 
   final List<MuscleLoad> loads;
+  final int legacyInferredSets;
 
   @override
   Widget build(BuildContext context) {
@@ -18,11 +23,11 @@ class TrainingLoadCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Expanded(
+              const Expanded(
                 child: Text(
-                  '肌群训练负荷',
+                  '近 7 天有效训练',
                   style: TextStyle(
                     color: Color(0xFF1F2725),
                     fontSize: 19,
@@ -30,16 +35,21 @@ class TrainingLoadCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(
-                Icons.info_outline_rounded,
-                color: Color(0xFF008C8C),
-                size: 21,
+              IconButton(
+                key: const Key('effective-sets-info'),
+                tooltip: '什么是有效组',
+                onPressed: () => _showExplanation(context),
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(
+                  Icons.info_outline_rounded,
+                  color: Color(0xFF008C8C),
+                  size: 21,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 3),
           const Text(
-            '近 7 天',
+            '已完成的非热身训练组',
             style: TextStyle(
               color: Color(0xFF899092),
               fontSize: 13,
@@ -47,16 +57,17 @@ class TrainingLoadCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          LayoutBuilder(
-            builder: (context, constraints) => SizedBox(
-              width: constraints.maxWidth,
-              height: loads.length * 31.0,
-              child: CustomPaint(painter: MuscleLoadChartPainter(loads)),
-            ),
-          ),
-          if (!hasLoad)
+          if (hasLoad)
+            LayoutBuilder(
+              builder: (context, constraints) => SizedBox(
+                width: constraints.maxWidth,
+                height: loads.length * 31.0,
+                child: CustomPaint(painter: MuscleLoadChartPainter(loads)),
+              ),
+            )
+          else
             const Padding(
-              padding: EdgeInsets.only(top: 5),
+              padding: EdgeInsets.symmetric(vertical: 14),
               child: Text(
                 '最近 7 天暂无足够训练数据',
                 style: TextStyle(
@@ -66,10 +77,48 @@ class TrainingLoadCard extends StatelessWidget {
                 ),
               ),
             ),
+          if (legacyInferredSets > 0)
+            const Padding(
+              padding: EdgeInsets.only(top: 7),
+              child: Text(
+                '包含部分历史训练记录',
+                style: TextStyle(color: Color(0xFF91999B), fontSize: 11),
+              ),
+            ),
         ],
       ),
     );
   }
+
+  Future<void> _showExplanation(
+    BuildContext context,
+  ) => showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (_) => const SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '有效训练组',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            SizedBox(height: 10),
+            Text(
+              '有效组不包含热身组。目前 GOAT V1 将已完成且次数大于 0 的非热身训练组计为有效组。超级组、递减组、AMRAP 和力竭组均按实际完成的单组计数。',
+              style: TextStyle(fontSize: 14, height: 1.45),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   static const _cardDecoration = BoxDecoration(
     color: Colors.white,

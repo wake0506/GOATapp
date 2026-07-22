@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:goat_app/features/home/home_page.dart';
+import 'package:goat_app/features/analytics/models/weight_trend.dart';
 import 'package:goat_app/features/home/widgets/macro_half_ring.dart';
 import 'package:goat_app/models/consumed_record.dart';
 import 'package:goat_app/models/daily_macro_stats.dart';
@@ -21,6 +22,7 @@ void main() {
     ValueChanged<String>? onAddMeal,
     ValueChanged<String>? onVoiceMeal,
     VoidCallback? onTraining,
+    WeightTrend? weightTrend,
   }) {
     return MaterialApp(
       home: HomePage(
@@ -51,6 +53,7 @@ void main() {
         onVoiceMeal: onVoiceMeal ?? (_) {},
         onOpenTraining: onTraining ?? () {},
         onAddExercise: () {},
+        weightTrend: weightTrend,
       ),
     );
   }
@@ -69,6 +72,72 @@ void main() {
       expect(find.text('FAT'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'home weight card keeps current weight primary and trend secondary',
+    (tester) async {
+      await tester.pumpWidget(
+        buildHome(
+          weightTrend: WeightTrend(
+            anchorDate: DateTime(2026, 7, 14),
+            windowDays: 7,
+            readingCount: 7,
+            dataQuality: WeightTrendDataQuality.complete,
+            sevenDayAverageKg: 71.48,
+            change7dKg: -0.35,
+          ),
+        ),
+      );
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is RichText && widget.text.toPlainText().contains('70.25'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('趋势 71.48 kg'), findsOneWidget);
+      expect(find.text('近7天 -0.35 kg'), findsOneWidget);
+    },
+  );
+
+  testWidgets('home weight trend explains unavailable partial states', (
+    tester,
+  ) async {
+    Future<void> pumpTrend(WeightTrend trend) =>
+        tester.pumpWidget(buildHome(weightTrend: trend));
+
+    await pumpTrend(
+      WeightTrend(
+        anchorDate: DateTime(2026, 7, 14),
+        windowDays: 7,
+        readingCount: 0,
+        dataQuality: WeightTrendDataQuality.unavailable,
+      ),
+    );
+    expect(find.text('暂无趋势数据'), findsOneWidget);
+
+    await pumpTrend(
+      WeightTrend(
+        anchorDate: DateTime(2026, 7, 14),
+        windowDays: 7,
+        readingCount: 1,
+        dataQuality: WeightTrendDataQuality.singleReading,
+        sevenDayAverageKg: 71.2,
+      ),
+    );
+    expect(find.text('数据仍不足'), findsOneWidget);
+
+    await pumpTrend(
+      WeightTrend(
+        anchorDate: DateTime(2026, 7, 14),
+        windowDays: 7,
+        readingCount: 4,
+        dataQuality: WeightTrendDataQuality.partial,
+        sevenDayAverageKg: 71.3,
+      ),
+    );
+    expect(find.text('数据积累中'), findsOneWidget);
+  });
 
   testWidgets('home uses the shared GOAT page header typography', (
     tester,
@@ -196,14 +265,14 @@ void main() {
       await tester.drag(find.byType(Scrollable).first, const Offset(0, -460));
       await tester.pumpAndSettle();
       for (final meal in ['早餐', '午餐']) {
-        await tester.tap(find.byTooltip('${meal}添加食物').first);
-        await tester.tap(find.byTooltip('${meal}语音录入').first);
+        await tester.tap(find.byTooltip('$meal添加食物').first);
+        await tester.tap(find.byTooltip('$meal语音录入').first);
       }
       await tester.drag(find.byType(Scrollable).first, const Offset(0, -280));
       await tester.pumpAndSettle();
       for (final meal in ['晚餐', '加餐']) {
-        await tester.tap(find.byTooltip('${meal}添加食物').first);
-        await tester.tap(find.byTooltip('${meal}语音录入').first);
+        await tester.tap(find.byTooltip('$meal添加食物').first);
+        await tester.tap(find.byTooltip('$meal语音录入').first);
       }
 
       expect(manualMeals, ['早餐', '午餐', '晚餐', '加餐']);

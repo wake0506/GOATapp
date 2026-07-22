@@ -6,6 +6,11 @@ import '../models/effective_set_summary.dart';
 class EffectiveSetCalculator {
   const EffectiveSetCalculator();
 
+  bool isEffectiveSet(SetRecord set) =>
+      !set.replacementPlaceholder &&
+      set.reps > 0 &&
+      set.resolvedSetType != TrainingSetType.warmup;
+
   EffectiveSetSummary calculate({
     required Iterable<TrainingSession> completedSessions,
     required AnalyticsDateRange dateRange,
@@ -34,7 +39,7 @@ class EffectiveSetCalculator {
           if (isLegacyInferred) legacyInferredSets++;
           final isWarmup = set.resolvedSetType == TrainingSetType.warmup;
           if (isWarmup) warmupSets++;
-          final isEffective = !isWarmup;
+          final isEffective = isEffectiveSet(set);
           if (isEffective) effectiveSets++;
           if (group != null) {
             final counter = counters[group]!;

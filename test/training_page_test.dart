@@ -14,6 +14,7 @@ void main() {
     VoidCallback? onHistory,
     VoidCallback? onTemplates,
     VoidCallback? onWeeklyReview,
+    VoidCallback? onCoverage,
   }) {
     return MaterialApp(
       home: TrainingPage(
@@ -25,6 +26,7 @@ void main() {
         onViewHistory: onHistory ?? () {},
         onManageTemplates: onTemplates ?? () {},
         onOpenWeeklyReview: onWeeklyReview,
+        onOpenCoverage: onCoverage,
       ),
     );
   }
@@ -60,7 +62,7 @@ void main() {
   testWidgets('quick start and nested entries use the existing flows', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(800, 900);
+    tester.view.physicalSize = const Size(800, 1200);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -70,6 +72,7 @@ void main() {
     var historyCount = 0;
     var templateCount = 0;
     var weeklyReviewCount = 0;
+    var coverageCount = 0;
     await tester.pumpWidget(
       buildPage(
         onStartTraining: () => startCount++,
@@ -78,6 +81,7 @@ void main() {
         onHistory: () => historyCount++,
         onTemplates: () => templateCount++,
         onWeeklyReview: () => weeklyReviewCount++,
+        onCoverage: () => coverageCount++,
       ),
     );
 
@@ -90,6 +94,8 @@ void main() {
     await tester.tap(find.text('创建 / 管理训练方案'));
     await tester.ensureVisible(find.text('本周复盘'));
     await tester.tap(find.text('本周复盘'));
+    await tester.ensureVisible(find.text('训练覆盖'));
+    await tester.tap(find.text('训练覆盖'));
 
     expect(startCount, 1);
     expect(pplCount, 1);
@@ -97,6 +103,7 @@ void main() {
     expect(historyCount, 1);
     expect(templateCount, 1);
     expect(weeklyReviewCount, 1);
+    expect(coverageCount, 1);
   });
 
   testWidgets('real sessions feed status, load and personal bests', (

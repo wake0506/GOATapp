@@ -32,6 +32,8 @@ import 'features/training/exercise_time.dart';
 import 'features/training/training_page.dart';
 import 'features/training/domain/active_training_session.dart';
 import 'features/training/pages/active_training_page.dart';
+import 'features/training/pages/training_coverage_page.dart';
+import 'features/training/services/training_coverage_calculator.dart';
 import 'features/training/services/training_draft_factory.dart';
 import 'features/training/services/training_session_engine.dart';
 import 'features/training/services/training_template_store.dart';
@@ -39,6 +41,7 @@ import 'features/training/widgets/training_setup_sheet.dart';
 import 'features/training/widgets/training_template_manager_sheet.dart';
 import 'features/home/home_page.dart';
 import 'features/analytics/models/weight_trend.dart';
+import 'features/analytics/models/analytics_date_range.dart';
 import 'features/analytics/pages/weekly_review_page.dart';
 import 'features/analytics/services/trend_weight_calculator.dart';
 import 'features/analytics/services/weekly_nutrition_review_calculator.dart';
@@ -817,6 +820,7 @@ class _MainTabControllerState extends State<MainTabController>
       onViewHistory: _showTrainingHistorySheet,
       onManageTemplates: _showTrainingTemplateManager,
       onOpenWeeklyReview: _showWeeklyReviewPage,
+      onOpenCoverage: _showTrainingCoveragePage,
     );
   }
 
@@ -859,10 +863,53 @@ class _MainTabControllerState extends State<MainTabController>
       weightRecords: weights,
       anchorDate: anchor,
     );
+    final coverage = const TrainingCoverageCalculator().calculateHistory(
+      completedSessions: allTrainingSessions,
+      dateRange: AnalyticsDateRange(
+        start: anchor.subtract(const Duration(days: 6)),
+        end: anchor,
+      ),
+    );
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            WeeklyReviewPage(training: training, nutrition: nutrition),
+        builder: (_) => WeeklyReviewPage(
+          training: training,
+          nutrition: nutrition,
+          coverage: coverage,
+        ),
+      ),
+    );
+  }
+
+  void _showTrainingCoveragePage() {
+    final anchor = DateUtils.dateOnly(
+      DateTime.tryParse(viewDateStr) ?? DateTime.now(),
+    );
+    final calculator = const TrainingCoverageCalculator();
+    final sessionCoverage = _activeTrainingSession != null
+        ? calculator.calculateSession(
+            session: _activeTrainingSession!.draft,
+            isActiveSession: true,
+          )
+        : calculator.calculateSessions(
+            sessions: allTrainingSessions.where(
+              (session) => session.date == viewDateStr,
+            ),
+          );
+    final weeklyCoverage = calculator.calculateHistory(
+      completedSessions: allTrainingSessions,
+      dateRange: AnalyticsDateRange(
+        start: anchor.subtract(const Duration(days: 6)),
+        end: anchor,
+      ),
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TrainingCoveragePage(
+          sessionCoverage: sessionCoverage,
+          weeklyCoverage: weeklyCoverage,
+          catalog: exerciseCatalog,
+        ),
       ),
     );
   }

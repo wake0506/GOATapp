@@ -1,17 +1,8 @@
-enum ExerciseMovementPattern {
-  horizontalPush,
-  verticalPush,
-  horizontalPull,
-  verticalPull,
-  squat,
-  hinge,
-  lunge,
-  elbowFlexion,
-  elbowExtension,
-  shoulderIsolation,
-  core,
-  other,
-}
+import 'features/training/models/exercise_metadata.dart';
+import 'features/training/models/exercise_metadata_catalog.dart';
+
+export 'features/training/models/exercise_metadata.dart'
+    show ExerciseMovementPattern;
 
 class ExerciseDefinition {
   final String? _configuredId;
@@ -21,7 +12,7 @@ class ExerciseDefinition {
   final List<String> _configuredPrimaryMuscles;
   final List<String> _configuredSecondaryMuscles;
   final ExerciseMovementPattern? _configuredMovementPattern;
-  final List<String> muscleRegions;
+  final List<String> _configuredMuscleRegions;
 
   const ExerciseDefinition({
     String? id,
@@ -31,11 +22,12 @@ class ExerciseDefinition {
     List<String> primaryMuscles = const [],
     List<String> secondaryMuscles = const [],
     ExerciseMovementPattern? movementPattern,
-    this.muscleRegions = const [],
+    List<String> muscleRegions = const [],
   }) : _configuredId = id,
        _configuredPrimaryMuscles = primaryMuscles,
        _configuredSecondaryMuscles = secondaryMuscles,
-       _configuredMovementPattern = movementPattern;
+       _configuredMovementPattern = movementPattern,
+       _configuredMuscleRegions = muscleRegions;
 
   String get id => _configuredId?.trim().isNotEmpty == true
       ? _configuredId!
@@ -45,12 +37,31 @@ class ExerciseDefinition {
 
   List<String> get primaryMuscles => _configuredPrimaryMuscles.isNotEmpty
       ? _configuredPrimaryMuscles
-      : _primaryMusclesFor(bodyPart);
+      : exerciseMetadataById(id)?.primaryMuscles
+                .map(muscleGroupStorageValue)
+                .toList(growable: false) ??
+            _primaryMusclesFor(bodyPart);
 
-  List<String> get secondaryMuscles => _configuredSecondaryMuscles;
+  List<String> get secondaryMuscles => _configuredSecondaryMuscles.isNotEmpty
+      ? _configuredSecondaryMuscles
+      : exerciseMetadataById(id)?.secondaryMuscles
+                .map(muscleGroupStorageValue)
+                .toList(growable: false) ??
+            const [];
+
+  List<String> get muscleRegions => _configuredMuscleRegions.isNotEmpty
+      ? _configuredMuscleRegions
+      : exerciseMetadataById(id)?.muscleRegions
+                .map(muscleRegionStorageValue)
+                .toList(growable: false) ??
+            const [];
+
+  ExerciseMetadata? get metadata => exerciseMetadataById(id);
 
   ExerciseMovementPattern get movementPattern =>
-      _configuredMovementPattern ?? _movementPatternFor(id);
+      _configuredMovementPattern ??
+      exerciseMetadataById(id)?.movementPattern ??
+      _movementPatternFor(id);
 }
 
 const List<String> exerciseBodyParts = [
@@ -175,7 +186,12 @@ const List<ExerciseDefinition> exerciseCatalog = [
   ExerciseDefinition(name: '绳索下压', bodyPart: '手臂', equipment: '绳索'),
   ExerciseDefinition(name: '反握绳索下压', bodyPart: '手臂', equipment: '绳索'),
   ExerciseDefinition(name: '绳索过顶臂屈伸', bodyPart: '手臂', equipment: '绳索'),
-  ExerciseDefinition(name: '双杠臂屈伸', bodyPart: '手臂', equipment: '徒手'),
+  ExerciseDefinition(
+    id: 'parallel_bar_dip_triceps',
+    name: '双杠臂屈伸',
+    bodyPart: '手臂',
+    equipment: '徒手',
+  ),
   ExerciseDefinition(name: '钻石俯卧撑', bodyPart: '手臂', equipment: '徒手'),
 
   // Core

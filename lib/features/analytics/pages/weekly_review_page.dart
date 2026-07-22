@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../widgets/goat_page_header.dart';
+import '../../training/models/exercise_metadata.dart';
+import '../../training/models/training_coverage.dart';
 import '../models/effective_set_summary.dart';
 import '../models/weight_trend.dart';
 import '../models/weekly_review.dart';
@@ -10,10 +12,12 @@ class WeeklyReviewPage extends StatelessWidget {
     super.key,
     required this.training,
     required this.nutrition,
+    this.coverage,
   });
 
   final WeeklyTrainingReview training;
   final WeeklyNutritionReview nutrition;
+  final TrainingCoverageResult? coverage;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -33,6 +37,10 @@ class WeeklyReviewPage extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         _TrainingReviewCard(review: training),
+        if (coverage != null) ...[
+          const SizedBox(height: 14),
+          _WeeklyCoverageCard(coverage: coverage!),
+        ],
         const SizedBox(height: 14),
         _NutritionReviewCard(review: nutrition),
         const SizedBox(height: 14),
@@ -42,6 +50,52 @@ class WeeklyReviewPage extends StatelessWidget {
   );
 
   static String _date(DateTime date) => '${date.month}/${date.day}';
+}
+
+class _WeeklyCoverageCard extends StatelessWidget {
+  const _WeeklyCoverageCard({required this.coverage});
+
+  final TrainingCoverageResult coverage;
+
+  @override
+  Widget build(BuildContext context) {
+    final more = coverage.muscleCoverage
+        .where(
+          (item) =>
+              item.level == CoverageLevel.sufficient ||
+              item.level == CoverageLevel.high,
+        )
+        .map((item) => muscleGroupLabel(item.muscle))
+        .toList();
+    final less = coverage.muscleCoverage
+        .where(
+          (item) =>
+              coverage.targetMuscleGroups.contains(item.muscle) &&
+              (item.level == CoverageLevel.untrained ||
+                  item.level == CoverageLevel.light),
+        )
+        .map((item) => muscleGroupLabel(item.muscle))
+        .toList();
+    return _ReviewCard(
+      key: const Key('weekly-coverage-review'),
+      title: '本周训练覆盖',
+      quality: coverageQualityLabel(coverage.dataQuality),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            more.isEmpty ? '本周记录较少' : '覆盖较多：${more.join('、')}',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            less.isEmpty ? '仅展示已有记录，不判断全身是否练满' : '当前记录中相对较少：${less.join('、')}',
+            style: const TextStyle(color: Color(0xFF68716F), fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TrainingReviewCard extends StatelessWidget {

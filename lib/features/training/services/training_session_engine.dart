@@ -371,6 +371,43 @@ class TrainingSessionEngine {
     );
   }
 
+  Future<ActiveTrainingSession> adoptRecommendedExercise({
+    required TrainingExercise recommendation,
+  }) async {
+    final exerciseId = recommendation.exerciseId?.trim();
+    if (exerciseId == null || exerciseId.isEmpty) {
+      throw ArgumentError('A stable exercise ID is required.');
+    }
+    final active = await _requiredActive();
+    var target = active.draft.exercises
+        .where(
+          (exercise) =>
+              exercise.status != TrainingExerciseStatus.replaced &&
+              exercise.exerciseId == exerciseId,
+        )
+        .firstOrNull;
+    if (target == null) {
+      recommendation
+        ..status = TrainingExerciseStatus.planned
+        ..orderIndex = active.draft.exercises.length;
+      active.draft.exercises.add(recommendation);
+      target = recommendation;
+    }
+    final hasPendingSet = target.sets.any(
+      (set) => set.completedAt == null && !set.replacementPlaceholder,
+    );
+    if (!hasPendingSet) {
+      throw StateError('The recommended exercise has no pending sets.');
+    }
+    final next = active.copyWith(
+      currentExerciseId: exerciseId,
+      clearCurrentSetId: true,
+      updatedAt: _clock(),
+    );
+    await _repository.saveActiveSession(next);
+    return next;
+  }
+
   Future<ActiveTrainingSession> pairSuperset({
     required String firstExerciseId,
     required String secondExerciseId,

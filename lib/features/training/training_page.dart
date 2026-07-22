@@ -5,6 +5,7 @@ import 'domain/active_training_session.dart';
 import 'models/training_page_view_model.dart';
 import 'widgets/personal_best_card.dart';
 import 'widgets/training_ai_insight_card.dart';
+import 'widgets/training_coverage_entry.dart';
 import 'widgets/active_training_session_card.dart';
 import 'widgets/training_load_card.dart';
 import 'widgets/training_page_header.dart';
@@ -25,6 +26,7 @@ class TrainingPage extends StatelessWidget {
     this.activeSession,
     this.onResumeTraining,
     this.onOpenWeeklyReview,
+    this.onOpenCoverage,
   });
 
   final List<TrainingSession> sessions;
@@ -37,6 +39,7 @@ class TrainingPage extends StatelessWidget {
   final ActiveTrainingSession? activeSession;
   final VoidCallback? onResumeTraining;
   final VoidCallback? onOpenWeeklyReview;
+  final VoidCallback? onOpenCoverage;
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +82,10 @@ class TrainingPage extends StatelessWidget {
               loads: viewModel.muscleLoads,
               legacyInferredSets: viewModel.legacyInferredSets,
             ),
+            if (onOpenCoverage != null) ...[
+              const SizedBox(height: 10),
+              TrainingCoverageEntry(onTap: onOpenCoverage!),
+            ],
             const SizedBox(height: 14),
             PersonalBestCard(personalBests: viewModel.personalBests),
           ],

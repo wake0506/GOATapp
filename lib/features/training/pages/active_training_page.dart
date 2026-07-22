@@ -10,10 +10,14 @@ import '../../analytics/models/progression_recommendation.dart';
 import '../../analytics/services/progression_recommendation_engine.dart';
 import '../domain/active_training_session.dart';
 import '../domain/training_session_state.dart';
+import '../models/exercise_recommendation.dart';
+import '../services/exercise_recommendation_engine.dart';
 import '../services/exercise_replacement_service.dart';
+import '../services/training_coverage_calculator.dart';
 import '../services/training_session_engine.dart';
 import '../services/warmup_suggestion_service.dart';
 import '../widgets/exercise_replacement_sheet.dart';
+import '../widgets/next_exercise_recommendation_card.dart';
 import '../widgets/plate_calculator_sheet.dart';
 import '../widgets/rir_selector.dart';
 import '../widgets/rest_timer_card.dart';
@@ -53,6 +57,8 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   late ActiveTrainingSession _session = widget.initialSession;
   ExercisePerformance? _lastPerformance;
   ProgressionRecommendation? _recommendation;
+  List<ExerciseRecommendationResult> _nextExerciseRecommendations = const [];
+  String? _ignoredRecommendationForExerciseId;
   bool _autofilled = false;
   bool _busy = false;
   Timer? _restTimer;
@@ -110,6 +116,14 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
       (set) => set.completedAt == null && !set.replacementPlaceholder,
     ),
   );
+
+  bool get _currentExerciseCompleted {
+    final exercise = _exercise;
+    if (exercise == null || exercise.sets.isEmpty) return false;
+    return exercise.sets
+        .where((set) => !set.replacementPlaceholder)
+        .every((set) => set.completedAt != null);
+  }
 
   int get _setIndex {
     final exercise = _exercise;
@@ -337,7 +351,11 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   }
 
   void _setSession(ActiveTrainingSession value) {
+    if (_session.currentExerciseId != value.currentExerciseId) {
+      _ignoredRecommendationForExerciseId = null;
+    }
     _session = value;
+    _refreshCoverageRecommendations();
     widget.onSessionChanged(value);
     if (mounted) setState(() {});
     if (value.state == TrainingSessionState.resting) {
@@ -347,6 +365,109 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
       _restTimer?.cancel();
       _restTimer = null;
     }
+  }
+
+  void _refreshCoverageRecommendations() {
+    final coverage = const TrainingCoverageCalculator().calculateSession(
+      session: _session.draft,
+      isActiveSession: true,
+      catalog: widget.catalog,
+    );
+    if (_ignoredRecommendationForExerciseId == _session.currentExerciseId) {
+      _nextExerciseRecommendations = const [];
+      return;
+    }
+    _nextExerciseRecommendations = const ExerciseRecommendationEngine()
+        .complementary(
+          currentSession: _session.draft,
+          coverageResult: coverage,
+          catalog: widget.catalog,
+        )
+        .take(5)
+        .toList(growable: false);
+  }
+
+  Future<void> _adoptNextExercise(
+    ExerciseRecommendationResult recommendation,
+  ) async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('采用这条动作建议？'),
+        content: Text(
+          '将 ${recommendation.exercise.name} 加入或切换为下一动作。当前训练方案不会改变。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const Key('next-exercise-recommendation-confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('确认采用'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final definition = recommendation.exercise;
+      final updated = await widget.engine.adoptRecommendedExercise(
+        recommendation: TrainingExercise(
+          exerciseId: definition.id,
+          exerciseName: definition.name,
+          bodyPart: definition.bodyPart,
+          sets: [
+            for (var index = 0; index < 4; index++)
+              SetRecord(
+                id: '${_session.id}-${definition.id}-${index + 1}',
+                setType: TrainingSetType.working,
+              ),
+          ],
+        ),
+      );
+      _setSession(updated);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('下一动作已切换为 ${definition.name}')));
+      }
+    } catch (error) {
+      _showSaveError(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _showOtherNextExercises() async {
+    if (_nextExerciseRecommendations.isEmpty) return;
+    final selected = await ExerciseRecommendationSheet.show(
+      context,
+      recommendations: _nextExerciseRecommendations,
+    );
+    if (selected != null && mounted) await _adoptNextExercise(selected);
+  }
+
+  void _ignoreNextExerciseRecommendation() {
+    setState(() {
+      _ignoredRecommendationForExerciseId = _session.currentExerciseId;
+      _nextExerciseRecommendations = const [];
+    });
+  }
+
+  Widget? _nextExerciseRecommendationCard() {
+    if (!_currentExerciseCompleted || _nextExerciseRecommendations.isEmpty) {
+      return null;
+    }
+    return NextExerciseRecommendationCard(
+      recommendation: _nextExerciseRecommendations.first,
+      onApply: () => _adoptNextExercise(_nextExerciseRecommendations.first),
+      onViewOther: _showOtherNextExercises,
+      onIgnore: _ignoreNextExerciseRecommendation,
+    );
   }
 
   Future<void> _updateSet({
@@ -765,6 +886,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   Widget _buildRestBody() {
     final rest = _session.rest!;
     final nextExercise = _nextPendingExercise ?? _exercise;
+    final nextRecommendation = _nextExerciseRecommendationCard();
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
       children: [
@@ -791,12 +913,17 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           onSkipRest: _skipRest,
           onChangeDuration: _changeRestDuration,
         ),
+        if (nextRecommendation != null) ...[
+          const SizedBox(height: 14),
+          nextRecommendation,
+        ],
       ],
     );
   }
 
   Widget _buildReadyBody() {
     final exercise = _nextPendingExercise ?? _exercise;
+    final nextRecommendation = _nextExerciseRecommendationCard();
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 30),
       children: [
@@ -846,6 +973,10 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
             ],
           ),
         ),
+        if (nextRecommendation != null) ...[
+          const SizedBox(height: 14),
+          nextRecommendation,
+        ],
       ],
     );
   }
@@ -1006,6 +1137,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
     final completedSets =
         exercise?.sets.where((item) => item.completedAt != null).length ?? 0;
     final isSetCompleted = _session.state == TrainingSessionState.setCompleted;
+    final nextExerciseRecommendation = _nextExerciseRecommendationCard();
     return Scaffold(
       key: const Key('active-training-page'),
       backgroundColor: const Color(0xFFF4F5F7),
@@ -1263,6 +1395,10 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
                       style: TextStyle(color: Color(0xFF8A9290), fontSize: 12),
                     ),
                   ),
+                ],
+                if (isSetCompleted && nextExerciseRecommendation != null) ...[
+                  const SizedBox(height: 14),
+                  nextExerciseRecommendation,
                 ],
               ],
             ),

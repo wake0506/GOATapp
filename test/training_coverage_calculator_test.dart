@@ -91,6 +91,18 @@ void main() {
       result.region(MuscleRegion.midBack).contributingExerciseIds,
       contains('seated_cable_row'),
     );
+    expect(
+      result
+          .region(MuscleRegion.lats)
+          .contributingEffectiveSets['lat_pulldown'],
+      3,
+    );
+    expect(
+      result
+          .region(MuscleRegion.midBack)
+          .contributingEffectiveSets['seated_cable_row'],
+      2,
+    );
   });
 
   test(

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../../exercise_catalog.dart';
 import '../../../models/training.dart';
 import '../../../repositories/training_repository.dart';
+import '../../analytics/models/analytics_date_range.dart';
 import '../../analytics/models/progression_recommendation.dart';
 import '../../analytics/services/progression_recommendation_engine.dart';
 import '../domain/active_training_session.dart';
@@ -27,6 +28,7 @@ import '../widgets/training_set_input_card.dart';
 import '../widgets/training_recommendation_card.dart';
 import '../widgets/warmup_suggestion_sheet.dart';
 import 'training_completion_page.dart';
+import 'training_coverage_page.dart';
 
 class ActiveTrainingPage extends StatefulWidget {
   const ActiveTrainingPage({
@@ -37,6 +39,7 @@ class ActiveTrainingPage extends StatefulWidget {
     required this.catalog,
     required this.onSessionChanged,
     required this.onFinished,
+    this.completedSessions = const [],
     this.clock,
   });
 
@@ -46,6 +49,7 @@ class ActiveTrainingPage extends StatefulWidget {
   final List<ExerciseDefinition> catalog;
   final ValueChanged<ActiveTrainingSession> onSessionChanged;
   final Future<void> Function(TrainingSession) onFinished;
+  final List<TrainingSession> completedSessions;
   final DateTime Function()? clock;
 
   @override
@@ -412,6 +416,13 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
       ),
     );
     if (confirmed != true || !mounted) return;
+    await _applyRecommendedExercise(recommendation);
+  }
+
+  Future<void> _applyRecommendedExercise(
+    ExerciseRecommendationResult recommendation,
+  ) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       final definition = recommendation.exercise;
@@ -440,6 +451,57 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _openTrainingCoverage() async {
+    final calculator = const TrainingCoverageCalculator();
+    final activeDate = DateTime.tryParse(_session.draft.date) ?? _now();
+    final anchor = DateUtils.dateOnly(activeDate);
+    final range = AnalyticsDateRange(
+      start: anchor.subtract(const Duration(days: 6)),
+      end: anchor,
+    );
+    final history = widget.completedSessions
+        .where((session) => session.id != _session.draft.id)
+        .toList(growable: true);
+    final todaySessions =
+        history
+            .where((session) => session.date == _session.draft.date)
+            .toList(growable: true)
+          ..add(_session.draft);
+    final weeklySessions =
+        history
+            .where((session) {
+              final date = DateTime.tryParse(session.date);
+              return date != null && range.contains(date);
+            })
+            .toList(growable: true)
+          ..add(_session.draft);
+    final currentCoverage = calculator.calculateSession(
+      session: _session.draft,
+      isActiveSession: true,
+      catalog: widget.catalog,
+    );
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TrainingCoveragePage(
+          currentCoverage: currentCoverage,
+          todayCoverage: calculator.calculateSessions(
+            sessions: todaySessions,
+            activeSessionIds: {_session.draft.id},
+            catalog: widget.catalog,
+          ),
+          weeklyCoverage: calculator.calculateSessions(
+            sessions: weeklySessions,
+            activeSessionIds: {_session.draft.id},
+            catalog: widget.catalog,
+          ),
+          catalog: widget.catalog,
+          activeSession: _session.draft,
+          onApplyRecommendation: _applyRecommendedExercise,
+        ),
+      ),
+    );
   }
 
   Future<void> _showOtherNextExercises() async {
@@ -1158,6 +1220,12 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           ],
         ),
         actions: [
+          IconButton(
+            key: const Key('active-training-coverage-entry'),
+            tooltip: '本次覆盖',
+            onPressed: _openTrainingCoverage,
+            icon: const Icon(Icons.view_in_ar_outlined),
+          ),
           IconButton(
             icon: const Icon(Icons.more_horiz),
             onPressed: () => showModalBottomSheet<void>(

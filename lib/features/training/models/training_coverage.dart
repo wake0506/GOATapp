@@ -30,12 +30,14 @@ class RegionCoverageItem {
     required this.level,
     required this.contributionUnits,
     required this.contributingExerciseIds,
+    this.contributingEffectiveSets = const {},
   });
 
   final MuscleRegion region;
   final CoverageLevel level;
   final int contributionUnits;
   final List<String> contributingExerciseIds;
+  final Map<String, int> contributingEffectiveSets;
 }
 
 class MovementCoverageItem {

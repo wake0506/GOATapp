@@ -13,11 +13,13 @@ class WeeklyReviewPage extends StatelessWidget {
     required this.training,
     required this.nutrition,
     this.coverage,
+    this.onOpenCoverage,
   });
 
   final WeeklyTrainingReview training;
   final WeeklyNutritionReview nutrition;
   final TrainingCoverageResult? coverage;
+  final VoidCallback? onOpenCoverage;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -39,7 +41,10 @@ class WeeklyReviewPage extends StatelessWidget {
         _TrainingReviewCard(review: training),
         if (coverage != null) ...[
           const SizedBox(height: 14),
-          _WeeklyCoverageCard(coverage: coverage!),
+          _WeeklyCoverageCard(
+            coverage: coverage!,
+            onOpenCoverage: onOpenCoverage,
+          ),
         ],
         const SizedBox(height: 14),
         _NutritionReviewCard(review: nutrition),
@@ -53,9 +58,10 @@ class WeeklyReviewPage extends StatelessWidget {
 }
 
 class _WeeklyCoverageCard extends StatelessWidget {
-  const _WeeklyCoverageCard({required this.coverage});
+  const _WeeklyCoverageCard({required this.coverage, this.onOpenCoverage});
 
   final TrainingCoverageResult coverage;
+  final VoidCallback? onOpenCoverage;
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +98,18 @@ class _WeeklyCoverageCard extends StatelessWidget {
             less.isEmpty ? '仅展示已有记录，不判断全身是否练满' : '当前记录中相对较少：${less.join('、')}',
             style: const TextStyle(color: Color(0xFF68716F), fontSize: 12),
           ),
+          if (onOpenCoverage != null) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const Key('weekly-open-3d-coverage'),
+                onPressed: onOpenCoverage,
+                icon: const Icon(Icons.view_in_ar_outlined, size: 17),
+                label: const Text('查看 3D'),
+              ),
+            ),
+          ],
         ],
       ),
     );

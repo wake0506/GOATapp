@@ -143,4 +143,20 @@ void main() {
       'pull_up',
     );
   });
+
+  testWidgets('active training exposes lightweight current coverage entry', (
+    tester,
+  ) async {
+    final setupResult = await setup();
+    await tester.pumpWidget(setupResult.page);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('active-training-coverage-entry')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('active-training-coverage-entry')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('training-coverage-page')), findsOneWidget);
+    expect(find.text('本次'), findsOneWidget);
+  });
 }

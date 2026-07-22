@@ -31,6 +31,7 @@ import 'features/tracking/weight_picker_sheet.dart';
 import 'features/training/exercise_time.dart';
 import 'features/training/training_page.dart';
 import 'features/training/domain/active_training_session.dart';
+import 'features/training/models/exercise_recommendation.dart';
 import 'features/training/pages/active_training_page.dart';
 import 'features/training/pages/training_coverage_page.dart';
 import 'features/training/services/training_coverage_calculator.dart';
@@ -876,6 +877,7 @@ class _MainTabControllerState extends State<MainTabController>
           training: training,
           nutrition: nutrition,
           coverage: coverage,
+          onOpenCoverage: _showTrainingCoveragePage,
         ),
       ),
     );
@@ -886,32 +888,81 @@ class _MainTabControllerState extends State<MainTabController>
       DateTime.tryParse(viewDateStr) ?? DateTime.now(),
     );
     final calculator = const TrainingCoverageCalculator();
-    final sessionCoverage = _activeTrainingSession != null
-        ? calculator.calculateSession(
-            session: _activeTrainingSession!.draft,
+    final active = _activeTrainingSession;
+    final currentCoverage = active == null
+        ? null
+        : calculator.calculateSession(
+            session: active.draft,
             isActiveSession: true,
-          )
-        : calculator.calculateSessions(
-            sessions: allTrainingSessions.where(
-              (session) => session.date == viewDateStr,
-            ),
           );
-    final weeklyCoverage = calculator.calculateHistory(
-      completedSessions: allTrainingSessions,
-      dateRange: AnalyticsDateRange(
-        start: anchor.subtract(const Duration(days: 6)),
-        end: anchor,
-      ),
+    final todaySessions = allTrainingSessions
+        .where((session) => session.date == viewDateStr)
+        .where((session) => session.id != active?.draft.id)
+        .toList();
+    if (active?.draft.date == viewDateStr) todaySessions.add(active!.draft);
+    final todayCoverage = calculator.calculateSessions(
+      sessions: todaySessions,
+      activeSessionIds: active == null ? const {} : {active.draft.id},
+    );
+    final weeklySessions = allTrainingSessions.where((session) {
+      final date = DateTime.tryParse(session.date);
+      return date != null &&
+          AnalyticsDateRange(
+            start: anchor.subtract(const Duration(days: 6)),
+            end: anchor,
+          ).contains(date) &&
+          session.id != active?.draft.id;
+    }).toList();
+    if (active != null) {
+      final activeDate = DateTime.tryParse(active.draft.date);
+      if (activeDate != null &&
+          AnalyticsDateRange(
+            start: anchor.subtract(const Duration(days: 6)),
+            end: anchor,
+          ).contains(activeDate)) {
+        weeklySessions.add(active.draft);
+      }
+    }
+    final weeklyCoverage = calculator.calculateSessions(
+      sessions: weeklySessions,
+      activeSessionIds: active == null ? const {} : {active.draft.id},
     );
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => TrainingCoveragePage(
-          sessionCoverage: sessionCoverage,
+          currentCoverage: currentCoverage,
+          todayCoverage: todayCoverage,
           weeklyCoverage: weeklyCoverage,
           catalog: exerciseCatalog,
+          activeSession: active?.draft,
+          onApplyRecommendation: active == null
+              ? null
+              : _adoptCoverageRecommendation,
         ),
       ),
     );
+  }
+
+  Future<void> _adoptCoverageRecommendation(
+    ExerciseRecommendationResult recommendation,
+  ) async {
+    final repository = _localTrainingRepository();
+    final active = _activeTrainingSession;
+    if (repository == null || active == null) return;
+    final definition = recommendation.exercise;
+    final updated = await TrainingSessionEngine(repository: repository)
+        .adoptRecommendedExercise(
+          recommendation: TrainingExercise(
+            exerciseId: definition.id,
+            exerciseName: definition.name,
+            bodyPart: definition.bodyPart,
+            sets: [
+              for (var index = 0; index < 4; index++)
+                SetRecord(id: '${active.id}-${definition.id}-${index + 1}'),
+            ],
+          ),
+        );
+    if (mounted) setState(() => _activeTrainingSession = updated);
   }
 
   TrainingTemplateStore? _localTrainingTemplateStore() {
@@ -1024,6 +1075,7 @@ class _MainTabControllerState extends State<MainTabController>
           engine: TrainingSessionEngine(repository: repository),
           repository: repository,
           catalog: exerciseCatalog,
+          completedSessions: allTrainingSessions,
           onSessionChanged: (session) {
             if (mounted) setState(() => _activeTrainingSession = session);
           },

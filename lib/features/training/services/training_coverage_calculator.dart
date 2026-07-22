@@ -127,6 +127,11 @@ class TrainingCoverageCalculator {
           final counter = regions[region]!;
           counter.units += effectiveSets * units;
           counter.exerciseIds.add(resolved.exerciseId);
+          counter.effectiveSetsByExercise.update(
+            resolved.exerciseId,
+            (value) => value + effectiveSets,
+            ifAbsent: () => effectiveSets,
+          );
         }
         final movement = movements[metadata.movementPattern]!;
         movement.effectiveSets += effectiveSets;
@@ -159,6 +164,12 @@ class TrainingCoverageCalculator {
             contributionUnits: regions[region]!.units,
             contributingExerciseIds: regions[region]!.exerciseIds.toList()
               ..sort(),
+            contributingEffectiveSets: Map.unmodifiable(
+              Map.fromEntries(
+                regions[region]!.effectiveSetsByExercise.entries.toList()
+                  ..sort((left, right) => left.key.compareTo(right.key)),
+              ),
+            ),
           ),
       ],
       movementPatternCoverage: [
@@ -273,6 +284,7 @@ class _MuscleCounter {
 class _RegionCounter {
   int units = 0;
   final Set<String> exerciseIds = {};
+  final Map<String, int> effectiveSetsByExercise = {};
 }
 
 class _MovementCounter {

@@ -21,3 +21,14 @@ Voice input follows `idle -> requestingPermission -> initializing -> listening -
 Phase 2A nutrition entry follows `quick add -> recent/repeat/text -> preview -> confirm -> repository`. System speech is opt-in through `ENABLE_SYSTEM_SPEECH=true`; the default path remains text-first and does not depend on a microphone or DeepSeek availability for ordinary historical/repeat actions.
 
 Phase 3A keeps the existing UI frozen and adds an additive Supabase schema, explicit RLS, durable sync operations, tombstones, and an Edge Function boundary for production nutrition AI. Remote deployment is a manual confirmation step.
+
+Stage 3 Personal AI Coach is local-first and additive. `lib/features/ai_coach/`
+owns namespaced profile memory, deterministic behavior summaries, structured
+suggestion state, the curated knowledge base, deterministic retrieval, minimal
+context assembly, structured response parsing, citation validation, and safe
+failure fallback. AI receives frozen engine outputs as evidence and may explain
+them, but it does not recalculate or directly mutate progression, coverage,
+exercise selection, rest, warm-up, plate, trend-weight, or effective-set
+results. A proposed action can reach a domain service only after explicit user
+confirmation and is marked `applied` only after validation and persistence
+succeed.

@@ -51,6 +51,8 @@ import 'features/analytics/services/weekly_nutrition_review_calculator.dart';
 import 'features/analytics/services/weekly_training_review_calculator.dart';
 import 'features/analytics/widgets/weight_trend_summary.dart';
 import 'features/history/widgets/history_calendar_day.dart';
+import 'features/ai_coach/pages/ai_profile_page.dart';
+import 'features/ai_coach/repositories/ai_coach_local_repository.dart';
 import 'widgets/goat_page_header.dart';
 import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
@@ -370,13 +372,31 @@ class _MainTabControllerState extends State<MainTabController>
 
   Future<void> _mergeGuestDataIfNeeded() async {
     if (_activeUserId == null || _storage == null) return;
-    final guest = _storage!.load(_storage!.namespaceForUser(null));
-    if (guest == null || !guest.hasData) return;
-    final userData = _storage!.load(_activeNamespace) ?? AppSnapshot.empty();
-    final merged = userData.merge(guest);
-    await _storage!.save(_activeNamespace, merged);
-    _guestMergePending = true;
-    _cloudSyncPending = true;
+    final guestNamespace = _storage!.namespaceForUser(null);
+    final guest = _storage!.load(guestNamespace);
+    if (guest != null && guest.hasData) {
+      final userData = _storage!.load(_activeNamespace) ?? AppSnapshot.empty();
+      final merged = userData.merge(guest);
+      await _storage!.save(_activeNamespace, merged);
+      _guestMergePending = true;
+      _cloudSyncPending = true;
+    }
+
+    final guestAiRepository = AiCoachLocalRepository(
+      preferences: _storage!.prefs,
+      namespace: guestNamespace,
+    );
+    final guestAiState = guestAiRepository.load();
+    if (guestAiState.memories.isNotEmpty ||
+        guestAiState.suggestions.isNotEmpty ||
+        guestAiState.feedback.isNotEmpty) {
+      final userAiRepository = AiCoachLocalRepository(
+        preferences: _storage!.prefs,
+        namespace: _activeNamespace,
+      );
+      await userAiRepository.mergeFrom(guestAiState);
+      await guestAiRepository.clear();
+    }
   }
 
   Future<void> _connectAndSyncCloud() async {
@@ -2434,12 +2454,20 @@ class _MainTabControllerState extends State<MainTabController>
     if (!confirm) return;
 
     try {
+      final namespaceToClear = _activeUserId == null ? null : _activeNamespace;
       // 2. 调用后端特权 RPC 函数删库跑路
       await supabase.rpc('delete_user');
       // 3. 退出当前登录状态并清空本地缓存
       await supabase.auth.signOut();
-      if (_activeUserId != null)
-        await _storage?.clearNamespace(_activeNamespace);
+      if (namespaceToClear != null) {
+        await _storage?.clearNamespace(namespaceToClear);
+      }
+      if (namespaceToClear != null && _storage != null) {
+        await AiCoachLocalRepository(
+          preferences: _storage!.prefs,
+          namespace: namespaceToClear,
+        ).clear();
+      }
       _activeUserId = null;
       _activeNamespace = _storage?.namespaceForUser(null) ?? 'guest';
       _applySnapshot(_storage?.load(_activeNamespace) ?? AppSnapshot.empty());
@@ -3784,6 +3812,12 @@ class _MainTabControllerState extends State<MainTabController>
               ),
             ),
 
+            _buildProfileItem(
+              Icons.psychology_alt_outlined,
+              'AI 对我的了解',
+              '本地隐私',
+              onTap: _showAiProfilePage,
+            ),
             _buildProfileItem(Icons.workspace_premium_rounded, '高级版会员', '未开启'),
             _buildProfileItem(
               Icons.notifications_active_rounded,
@@ -3840,34 +3874,59 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
-  Widget _buildProfileItem(IconData icon, String title, String trailing) {
+  Future<void> _showAiProfilePage() async {
+    final storage = _storage;
+    if (storage == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => AiProfilePage(
+          preferences: storage.prefs,
+          namespace: _activeNamespace,
+          trainingSessions: List.unmodifiable(allTrainingSessions),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileItem(
+    IconData icon,
+    String title,
+    String trailing, {
+    VoidCallback? onTap,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Row(
-        children: [
-          Icon(icon, size: 22, color: Colors.black54),
-          const SizedBox(width: 16),
-          Text(
-            title,
-            style: const TextStyle(fontSize: 16, color: Colors.black87),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(icon, size: 22, color: Colors.black54),
+              const SizedBox(width: 16),
+              Text(
+                title,
+                style: const TextStyle(fontSize: 16, color: Colors.black87),
+              ),
+              const Spacer(),
+              Text(
+                trailing,
+                style: const TextStyle(fontSize: 14, color: Colors.black38),
+              ),
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: Colors.black26,
+              ),
+            ],
           ),
-          const Spacer(),
-          Text(
-            trailing,
-            style: const TextStyle(fontSize: 14, color: Colors.black38),
-          ),
-          const SizedBox(width: 4),
-          const Icon(
-            Icons.chevron_right_rounded,
-            size: 18,
-            color: Colors.black26,
-          ),
-        ],
+        ),
       ),
     );
   }

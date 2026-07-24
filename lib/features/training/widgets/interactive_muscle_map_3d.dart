@@ -7,6 +7,7 @@ import '../models/muscle_region_3d_mapping.dart';
 import '../models/training_coverage.dart';
 import '../painters/muscle_map_3d_painter.dart';
 
+/// Legacy Stage 2E renderer retained only for rollback safety.
 class MuscleMap3DController extends ChangeNotifier {
   double _targetYaw = 0;
   MuscleRegion? _selectedRegion;
@@ -32,6 +33,7 @@ class MuscleMap3DController extends ChangeNotifier {
   }
 }
 
+/// Legacy Stage 2E renderer retained only for rollback safety.
 class InteractiveMuscleMap3D extends StatefulWidget {
   const InteractiveMuscleMap3D({
     super.key,

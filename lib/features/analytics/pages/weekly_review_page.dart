@@ -106,7 +106,7 @@ class _WeeklyCoverageCard extends StatelessWidget {
                 key: const Key('weekly-open-3d-coverage'),
                 onPressed: onOpenCoverage,
                 icon: const Icon(Icons.view_in_ar_outlined, size: 17),
-                label: const Text('查看 3D'),
+                label: const Text('查看肌群图'),
               ),
             ),
           ],

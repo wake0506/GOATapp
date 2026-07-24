@@ -7,17 +7,36 @@ import '../../../models/training.dart';
 import '../../../widgets/goat_page_header.dart';
 import '../models/exercise_metadata.dart';
 import '../models/exercise_recommendation.dart';
+import '../models/muscle_region_svg_mapping.dart';
 import '../models/training_coverage.dart';
 import '../painters/muscle_coverage_painter.dart';
-import '../painters/muscle_map_3d_painter.dart';
+import '../painters/svg_muscle_map_painter.dart';
 import '../services/exercise_recommendation_engine.dart';
-import '../widgets/interactive_muscle_map_3d.dart';
+import '../widgets/interactive_svg_muscle_map.dart';
 
 enum TrainingCoverageScope { current, today, sevenDays }
 
-typedef MuscleMap3DInitializer = Future<bool> Function();
+typedef MuscleMapSvgInitializer = Future<bool> Function();
 
-Future<bool> initializeProceduralMuscleMap3D() async => true;
+Future<bool> initializeSvgMuscleMap() async => true;
+
+ButtonStyle _bodyViewToggleStyle() => ButtonStyle(
+  visualDensity: VisualDensity.compact,
+  padding: const WidgetStatePropertyAll(
+    EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+  ),
+  backgroundColor: WidgetStateProperty.resolveWith(
+    (states) => states.contains(WidgetState.selected)
+        ? const Color(0xFFDDF0EB)
+        : const Color(0xFFF7F9F8),
+  ),
+  foregroundColor: WidgetStateProperty.resolveWith(
+    (states) => states.contains(WidgetState.selected)
+        ? const Color(0xFF006E6E)
+        : const Color(0xFF64706D),
+  ),
+  side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFE0E7E4))),
+);
 
 class TrainingCoveragePage extends StatefulWidget {
   const TrainingCoveragePage({
@@ -28,7 +47,7 @@ class TrainingCoveragePage extends StatefulWidget {
     this.currentCoverage,
     this.activeSession,
     this.onApplyRecommendation,
-    this.initialize3D = initializeProceduralMuscleMap3D,
+    this.initializeSvg = initializeSvgMuscleMap,
     this.initialRegion,
   });
 
@@ -39,7 +58,7 @@ class TrainingCoveragePage extends StatefulWidget {
   final TrainingSession? activeSession;
   final Future<void> Function(ExerciseRecommendationResult recommendation)?
   onApplyRecommendation;
-  final MuscleMap3DInitializer initialize3D;
+  final MuscleMapSvgInitializer initializeSvg;
   final MuscleRegion? initialRegion;
 
   @override
@@ -50,11 +69,11 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
   late TrainingCoverageScope _scope = widget.currentCoverage == null
       ? TrainingCoverageScope.today
       : TrainingCoverageScope.current;
-  late final MuscleMap3DController _mapController;
+  late final SvgMuscleMapController _mapController;
   late MuscleRegion? _selectedRegion = widget.initialRegion ?? _goalRegion();
   List<ExerciseRecommendationResult> _recommendations = const [];
   bool _recommendationsIgnored = false;
-  bool _initializing3D = true;
+  bool _initializingSvg = true;
   bool _simplified = false;
   bool _automaticFallback = false;
   MuscleMapView _fallbackView = MuscleMapView.front;
@@ -69,9 +88,9 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
   @override
   void initState() {
     super.initState();
-    _mapController = MuscleMap3DController();
+    _mapController = SvgMuscleMapController();
     _refreshRecommendations();
-    unawaited(_initialize3D());
+    unawaited(_initializeSvg());
   }
 
   @override
@@ -89,21 +108,21 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
     super.dispose();
   }
 
-  Future<void> _initialize3D() async {
+  Future<void> _initializeSvg() async {
     try {
-      final supported = await widget.initialize3D().timeout(
+      final supported = await widget.initializeSvg().timeout(
         const Duration(seconds: 2),
       );
       if (!mounted) return;
       setState(() {
-        _initializing3D = false;
+        _initializingSvg = false;
         _simplified = !supported;
         _automaticFallback = !supported;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _initializing3D = false;
+        _initializingSvg = false;
         _simplified = true;
         _automaticFallback = true;
       });
@@ -421,15 +440,15 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
         actions: [
           IconButton(
             key: const Key('coverage-view-mode-toggle'),
-            tooltip: _simplified ? '切换 3D 视图' : '切换简化视图',
-            onPressed: _initializing3D
+            tooltip: _simplified ? '切换精细视图' : '切换简化视图',
+            onPressed: _initializingSvg
                 ? null
                 : () => setState(() {
                     _simplified = !_simplified;
                     _automaticFallback = false;
                   }),
             icon: Icon(
-              _simplified ? Icons.view_in_ar_outlined : Icons.accessibility_new,
+              _simplified ? Icons.accessibility_new : Icons.line_axis_rounded,
               color: const Color(0xFF52605D),
             ),
           ),
@@ -458,14 +477,14 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: Row(
+                      child: const Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '肌群分布',
+                                  '肌群覆盖',
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.w700,
@@ -482,38 +501,65 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
                               ],
                             ),
                           ),
-                          _ViewShortcut(
-                            label: '正面',
-                            onTap: () {
-                              if (_simplified) {
-                                setState(
-                                  () => _fallbackView = MuscleMapView.front,
-                                );
-                              } else {
-                                _mapController.showFront();
-                              }
-                            },
-                          ),
-                          const SizedBox(width: 6),
-                          _ViewShortcut(
-                            label: '背面',
-                            onTap: () {
-                              if (_simplified) {
-                                setState(
-                                  () => _fallbackView = MuscleMapView.back,
-                                );
-                              } else {
-                                _mapController.showBack();
-                              }
-                            },
-                          ),
                         ],
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: _simplified
+                          ? SegmentedButton<MuscleMapView>(
+                              key: const Key('coverage-body-view-toggle'),
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment(
+                                  value: MuscleMapView.front,
+                                  label: Text('正面'),
+                                ),
+                                ButtonSegment(
+                                  value: MuscleMapView.back,
+                                  label: Text('背面'),
+                                ),
+                              ],
+                              selected: {_fallbackView},
+                              onSelectionChanged: (selection) => setState(
+                                () => _fallbackView = selection.first,
+                              ),
+                              style: _bodyViewToggleStyle(),
+                            )
+                          : ListenableBuilder(
+                              listenable: _mapController,
+                              builder: (context, child) =>
+                                  SegmentedButton<MuscleBodyView>(
+                                    key: const Key('coverage-body-view-toggle'),
+                                    showSelectedIcon: false,
+                                    segments: const [
+                                      ButtonSegment(
+                                        value: MuscleBodyView.front,
+                                        label: Text('正面'),
+                                      ),
+                                      ButtonSegment(
+                                        value: MuscleBodyView.back,
+                                        label: Text('背面'),
+                                      ),
+                                    ],
+                                    selected: {_mapController.view},
+                                    onSelectionChanged: (selection) {
+                                      if (selection.first ==
+                                          MuscleBodyView.front) {
+                                        _mapController.showFront();
+                                      } else {
+                                        _mapController.showBack();
+                                      }
+                                    },
+                                    style: _bodyViewToggleStyle(),
+                                  ),
+                            ),
+                    ),
                     const SizedBox(height: 8),
                     SizedBox(
-                      height: media.size.width >= 700 ? 450 : 398,
-                      child: _initializing3D
+                      height: media.size.width >= 700 ? 560 : 570,
+                      child: _initializingSvg
                           ? const _MuscleMapLoading()
                           : _simplified
                           ? Center(
@@ -530,7 +576,7 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
                                 ),
                               ),
                             )
-                          : InteractiveMuscleMap3D(
+                          : InteractiveSvgMuscleMap(
                               coverage: _coverage,
                               controller: _mapController,
                               initialRegion: _selectedRegion,
@@ -699,7 +745,10 @@ class _RegionCoverageSummary extends StatelessWidget {
                         width: 9,
                         height: 9,
                         decoration: BoxDecoration(
-                          color: muscleCoverage3DColor(item.level),
+                          color: svgMuscleCoverageColor(
+                            item.level,
+                            Theme.of(context).colorScheme.primary,
+                          ),
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -873,7 +922,10 @@ class _CoverageLegend extends StatelessWidget {
               width: 8,
               height: 8,
               decoration: BoxDecoration(
-                color: muscleCoverage3DColor(level),
+                color: svgMuscleCoverageColor(
+                  level,
+                  Theme.of(context).colorScheme.primary,
+                ),
                 shape: BoxShape.circle,
               ),
             ),
@@ -888,30 +940,6 @@ class _CoverageLegend extends StatelessWidget {
   );
 }
 
-class _ViewShortcut extends StatelessWidget {
-  const _ViewShortcut({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    borderRadius: BorderRadius.circular(99),
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F5F3),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-      ),
-    ),
-  );
-}
-
 class _LevelBadge extends StatelessWidget {
   const _LevelBadge({required this.level});
 
@@ -921,7 +949,10 @@ class _LevelBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
-      color: muscleCoverage3DColor(level),
+      color: svgMuscleCoverageColor(
+        level,
+        Theme.of(context).colorScheme.primary,
+      ),
       borderRadius: BorderRadius.circular(99),
     ),
     child: Text(
@@ -954,7 +985,7 @@ class _FallbackNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    key: const Key('muscle-map-3d-fallback-notice'),
+    key: const Key('muscle-map-svg-fallback-notice'),
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
       color: const Color(0xFFEAF4F1),
@@ -966,7 +997,7 @@ class _FallbackNotice extends StatelessWidget {
         SizedBox(width: 10),
         Expanded(
           child: Text(
-            '当前设备暂无法显示 3D 模型，已切换至简化视图。',
+            '精细肌群视图暂不可用，已切换至简化视图。',
             style: TextStyle(color: Color(0xFF52605D), fontSize: 12),
           ),
         ),
@@ -980,7 +1011,7 @@ class _MuscleMapLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    key: const Key('muscle-map-3d-loading'),
+    key: const Key('muscle-map-svg-loading'),
     margin: const EdgeInsets.all(18),
     decoration: BoxDecoration(
       color: const Color(0xFFF2F6F4),

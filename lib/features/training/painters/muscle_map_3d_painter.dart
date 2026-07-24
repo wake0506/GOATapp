@@ -79,6 +79,7 @@ class MuscleMap3DScene {
   }
 }
 
+/// Legacy Stage 2E renderer retained only for rollback safety.
 class MuscleMap3DPainter extends CustomPainter {
   const MuscleMap3DPainter({
     required this.coverage,

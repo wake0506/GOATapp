@@ -7,9 +7,10 @@ import 'package:goat_app/features/analytics/models/weekly_review.dart';
 import 'package:goat_app/features/analytics/pages/weekly_review_page.dart';
 import 'package:goat_app/features/training/domain/training_session_state.dart';
 import 'package:goat_app/features/training/models/exercise_recommendation.dart';
+import 'package:goat_app/features/training/models/muscle_region_svg_mapping.dart';
 import 'package:goat_app/features/training/models/training_coverage.dart';
 import 'package:goat_app/features/training/pages/training_coverage_page.dart';
-import 'package:goat_app/features/training/painters/muscle_map_3d_painter.dart';
+import 'package:goat_app/features/training/painters/svg_muscle_map_painter.dart';
 import 'package:goat_app/features/training/services/training_coverage_calculator.dart';
 import 'package:goat_app/models/training.dart';
 
@@ -86,7 +87,7 @@ void main() {
     TrainingCoverageResult? week,
     TrainingSession? activeSession,
     Future<void> Function(ExerciseRecommendationResult)? onApply,
-    MuscleMap3DInitializer initialize3D = initializeProceduralMuscleMap3D,
+    MuscleMapSvgInitializer initializeSvg = initializeSvgMuscleMap,
   }) => MaterialApp(
     home: TrainingCoveragePage(
       currentCoverage: current,
@@ -95,7 +96,7 @@ void main() {
       catalog: exerciseCatalog,
       activeSession: activeSession,
       onApplyRecommendation: onApply,
-      initialize3D: initialize3D,
+      initializeSvg: initializeSvg,
     ),
   );
 
@@ -114,13 +115,13 @@ void main() {
     expect(find.text('今日'), findsOneWidget);
     expect(find.text('近 7 天'), findsOneWidget);
 
-    MuscleMap3DPainter painter() =>
+    SvgMuscleMapPainter painter() =>
         tester
                 .widget<CustomPaint>(
-                  find.byKey(const Key('muscle-map-3d-painter')),
+                  find.byKey(const Key('svg-muscle-map-front')),
                 )
                 .painter
-            as MuscleMap3DPainter;
+            as SvgMuscleMapPainter;
 
     expect(painter().coverage.completedEffectiveSets, 2);
     await tester.tap(find.text('今日'));
@@ -131,30 +132,29 @@ void main() {
     expect(painter().coverage.completedEffectiveSets, 5);
   });
 
-  testWidgets('front back shortcuts and drag update only the 3D camera', (
+  testWidgets('front back toggle and drag change only the visual view', (
     tester,
   ) async {
     await tester.pumpWidget(page(today: coverage(sets: 2)));
     await tester.pumpAndSettle();
-    MuscleMap3DPainter painter() =>
+    SvgMuscleMapPainter painter(MuscleBodyView view) =>
         tester
                 .widget<CustomPaint>(
-                  find.byKey(const Key('muscle-map-3d-painter')),
+                  find.byKey(Key('svg-muscle-map-${view.name}')),
                 )
                 .painter
-            as MuscleMap3DPainter;
-    expect(painter().yaw, closeTo(0, 0.01));
+            as SvgMuscleMapPainter;
+    expect(painter(MuscleBodyView.front).view, MuscleBodyView.front);
     await tester.tap(find.text('背面'));
     await tester.pumpAndSettle();
-    expect(painter().yaw.abs(), closeTo(3.14159, 0.03));
-    final beforeDrag = painter().yaw;
+    expect(painter(MuscleBodyView.back).view, MuscleBodyView.back);
     await tester.drag(
-      find.byKey(const Key('interactive-muscle-map-3d')),
+      find.byKey(const Key('interactive-svg-muscle-map')),
       const Offset(70, 0),
     );
-    await tester.pump();
-    expect(painter().yaw, isNot(closeTo(beforeDrag, 0.05)));
-    expect(painter().coverage.completedEffectiveSets, 2);
+    await tester.pumpAndSettle();
+    expect(painter(MuscleBodyView.front).view, MuscleBodyView.front);
+    expect(painter(MuscleBodyView.front).coverage.completedEffectiveSets, 2);
   });
 
   testWidgets('failed initialization keeps 2D detail and honest labels', (
@@ -163,12 +163,12 @@ void main() {
     await tester.pumpWidget(
       page(
         today: coverage(sets: 1, unresolved: true),
-        initialize3D: () async => false,
+        initializeSvg: () async => false,
       ),
     );
     await tester.pumpAndSettle();
     expect(
-      find.byKey(const Key('muscle-map-3d-fallback-notice')),
+      find.byKey(const Key('muscle-map-svg-fallback-notice')),
       findsOneWidget,
     );
     expect(find.byKey(const Key('muscle-coverage-map')), findsOneWidget);
@@ -182,7 +182,7 @@ void main() {
     await tester.pumpWidget(
       page(
         today: coverage(sets: 2),
-        initialize3D: () async => throw StateError('renderer unavailable'),
+        initializeSvg: () async => throw StateError('renderer unavailable'),
       ),
     );
     await tester.pumpAndSettle();
@@ -321,50 +321,51 @@ void main() {
     expect(find.byKey(const Key('coverage-recommendation-card')), findsNothing);
   });
 
-  testWidgets('weekly review keeps static summary and opens 3D on demand', (
-    tester,
-  ) async {
-    var opened = false;
-    final range = AnalyticsDateRange(
-      start: DateTime(2026, 7, 14),
-      end: DateTime(2026, 7, 20),
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: WeeklyReviewPage(
-          training: WeeklyTrainingReview(
-            dateRange: range,
-            trainingDays: 1,
-            sessionCount: 1,
-            completedSets: 5,
-            effectiveSets: 5,
-            muscleGroups: const [],
-            totalVolume: 0,
-            dataQuality: WeeklyReviewDataQuality.partial,
-            reasons: const [WeeklyReviewReason.partialTrainingHistory],
-          ),
-          nutrition: WeeklyNutritionReview(
-            dateRange: range,
-            recordedDays: 0,
-            weightTrend: WeightTrend(
-              anchorDate: DateTime(2026, 7, 20),
-              windowDays: 7,
-              readingCount: 0,
-              dataQuality: WeightTrendDataQuality.unavailable,
+  testWidgets(
+    'weekly review keeps static summary and opens coverage on demand',
+    (tester) async {
+      var opened = false;
+      final range = AnalyticsDateRange(
+        start: DateTime(2026, 7, 14),
+        end: DateTime(2026, 7, 20),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: WeeklyReviewPage(
+            training: WeeklyTrainingReview(
+              dateRange: range,
+              trainingDays: 1,
+              sessionCount: 1,
+              completedSets: 5,
+              effectiveSets: 5,
+              muscleGroups: const [],
+              totalVolume: 0,
+              dataQuality: WeeklyReviewDataQuality.partial,
+              reasons: const [WeeklyReviewReason.partialTrainingHistory],
             ),
-            dataQuality: WeeklyReviewDataQuality.insufficient,
-            reasons: const [WeeklyReviewReason.partialNutritionLogging],
+            nutrition: WeeklyNutritionReview(
+              dateRange: range,
+              recordedDays: 0,
+              weightTrend: WeightTrend(
+                anchorDate: DateTime(2026, 7, 20),
+                windowDays: 7,
+                readingCount: 0,
+                dataQuality: WeightTrendDataQuality.unavailable,
+              ),
+              dataQuality: WeeklyReviewDataQuality.insufficient,
+              reasons: const [WeeklyReviewReason.partialNutritionLogging],
+            ),
+            coverage: coverage(sets: 5),
+            onOpenCoverage: () => opened = true,
           ),
-          coverage: coverage(sets: 5),
-          onOpenCoverage: () => opened = true,
         ),
-      ),
-    );
-    expect(find.byKey(const Key('weekly-coverage-review')), findsOneWidget);
-    expect(find.textContaining('覆盖较多：胸部'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('weekly-open-3d-coverage')));
-    expect(opened, isTrue);
-  });
+      );
+      expect(find.byKey(const Key('weekly-coverage-review')), findsOneWidget);
+      expect(find.textContaining('覆盖较多：胸部'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('weekly-open-3d-coverage')));
+      expect(opened, isTrue);
+    },
+  );
 
   for (final size in [
     const Size(360, 800),
@@ -385,7 +386,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.byKey(const Key('training-coverage-page')), findsOneWidget);
       expect(
-        find.byKey(const Key('interactive-muscle-map-3d')),
+        find.byKey(const Key('interactive-svg-muscle-map')),
         findsOneWidget,
       );
     });

@@ -1,5 +1,6 @@
 import '../../../exercise_catalog.dart';
 import '../../../models/progression_target.dart';
+import '../../../models/rest_prescription.dart';
 
 class TrainingTemplate {
   const TrainingTemplate({
@@ -7,15 +8,20 @@ class TrainingTemplate {
     required this.name,
     required this.exerciseIds,
     this.progressionTargets = const {},
+    this.restPrescriptions = const {},
   });
 
   final String id;
   final String name;
   final List<String> exerciseIds;
   final Map<String, ProgressionTarget> progressionTargets;
+  final Map<String, RestPrescription> restPrescriptions;
 
   ProgressionTarget? targetFor(String exerciseId) =>
       progressionTargets[exerciseId];
+
+  RestPrescription restFor(String exerciseId) =>
+      restPrescriptions[exerciseId] ?? const RestPrescription.recommended();
 
   List<ExerciseDefinition> resolveExercises(
     Iterable<ExerciseDefinition> catalog,
@@ -36,6 +42,9 @@ class TrainingTemplate {
     'progressionTargets': progressionTargets.map(
       (exerciseId, target) => MapEntry(exerciseId, target.toJson()),
     ),
+    'restPrescriptions': restPrescriptions.map(
+      (exerciseId, prescription) => MapEntry(exerciseId, prescription.toJson()),
+    ),
   };
 
   factory TrainingTemplate.fromJson(Map<String, dynamic> json) {
@@ -50,6 +59,17 @@ class TrainingTemplate {
         }
       }
     }
+    final rawRest = json['restPrescriptions'];
+    final restPrescriptions = <String, RestPrescription>{};
+    if (rawRest is Map) {
+      for (final entry in rawRest.entries) {
+        final exerciseId = entry.key.toString();
+        final prescription = RestPrescription.tryFromJson(entry.value);
+        if (exerciseId.isNotEmpty && prescription != null) {
+          restPrescriptions[exerciseId] = prescription;
+        }
+      }
+    }
     return TrainingTemplate(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -58,6 +78,7 @@ class TrainingTemplate {
           .where((value) => value.isNotEmpty)
           .toList(growable: false),
       progressionTargets: Map.unmodifiable(targets),
+      restPrescriptions: Map.unmodifiable(restPrescriptions),
     );
   }
 }

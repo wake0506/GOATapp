@@ -1,6 +1,7 @@
 import '../../../exercise_catalog.dart';
 import '../../../models/training.dart';
 import '../../../models/progression_target.dart';
+import '../../../models/rest_prescription.dart';
 import '../domain/training_session_state.dart';
 
 class TrainingDraftFactory {
@@ -13,6 +14,7 @@ class TrainingDraftFactory {
     required List<ExerciseDefinition> exercises,
     int setsPerExercise = 4,
     Map<String, ProgressionTarget> progressionTargets = const {},
+    Map<String, RestPrescription> restPrescriptions = const {},
   }) {
     final seenExerciseIds = <String>{};
     final uniqueExercises = exercises
@@ -35,6 +37,9 @@ class TrainingDraftFactory {
             orderIndex: exerciseIndex,
             progressionTarget:
                 progressionTargets[uniqueExercises[exerciseIndex].id],
+            restPrescription:
+                restPrescriptions[uniqueExercises[exerciseIndex].id] ??
+                const RestPrescription.recommended(),
             sets: [
               for (var setIndex = 0; setIndex < setsPerExercise; setIndex++)
                 SetRecord(

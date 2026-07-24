@@ -18,6 +18,7 @@ import 'models/food_item.dart';
 import 'models/statistics_period.dart';
 import 'models/training.dart';
 import 'models/progression_target.dart';
+import 'models/rest_prescription.dart';
 import 'models/water_intake_record.dart';
 import 'models/app_snapshot.dart';
 import 'models/parsed_diet_item.dart';
@@ -40,6 +41,7 @@ import 'features/training/services/training_session_engine.dart';
 import 'features/training/services/training_template_store.dart';
 import 'features/training/widgets/training_setup_sheet.dart';
 import 'features/training/widgets/training_template_manager_sheet.dart';
+import 'features/training/widgets/training_rest_summary.dart';
 import 'features/home/home_page.dart';
 import 'features/analytics/models/weight_trend.dart';
 import 'features/analytics/models/analytics_date_range.dart';
@@ -1010,6 +1012,7 @@ class _MainTabControllerState extends State<MainTabController>
       name: template.name,
       exercises: exercises,
       progressionTargets: template.progressionTargets,
+      restPrescriptions: template.restPrescriptions,
     );
   }
 
@@ -1033,6 +1036,7 @@ class _MainTabControllerState extends State<MainTabController>
     required String name,
     required List<ExerciseDefinition> exercises,
     Map<String, ProgressionTarget> progressionTargets = const {},
+    Map<String, RestPrescription> restPrescriptions = const {},
   }) async {
     if (_activeTrainingSession != null) {
       _openActiveTraining();
@@ -1048,6 +1052,7 @@ class _MainTabControllerState extends State<MainTabController>
       date: viewDateStr,
       exercises: exercises,
       progressionTargets: progressionTargets,
+      restPrescriptions: restPrescriptions,
     );
     try {
       final active = await TrainingSessionEngine(
@@ -1236,6 +1241,8 @@ class _MainTabControllerState extends State<MainTabController>
             ],
           ),
           const Divider(height: 20, color: Color(0xFFF0F0F0)),
+          TrainingRestSummary(session: session),
+          const SizedBox(height: 10),
 
           // 2. 核心列表：逐行展示组，相同动作名称合并
           ...session.exercises.expand((ex) {

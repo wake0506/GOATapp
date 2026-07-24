@@ -1,4 +1,5 @@
 import '../../../models/json_value.dart';
+import '../../../models/rest_prescription.dart';
 import '../../../models/training.dart';
 import 'training_session_state.dart';
 
@@ -8,6 +9,7 @@ class RestState {
     required this.restStartedAt,
     required this.restDurationSeconds,
     DateTime? restExpectedEndAt,
+    this.recommendation,
   }) : restExpectedEndAt =
            restExpectedEndAt ??
            restStartedAt.add(Duration(seconds: restDurationSeconds));
@@ -16,16 +18,19 @@ class RestState {
   final DateTime restStartedAt;
   final int restDurationSeconds;
   final DateTime restExpectedEndAt;
+  final RestRecommendation? recommendation;
 
   RestState copyWith({
     DateTime? restStartedAt,
     int? restDurationSeconds,
     DateTime? restExpectedEndAt,
+    RestRecommendation? recommendation,
   }) => RestState(
     setId: setId,
     restStartedAt: restStartedAt ?? this.restStartedAt,
     restDurationSeconds: restDurationSeconds ?? this.restDurationSeconds,
     restExpectedEndAt: restExpectedEndAt ?? this.restExpectedEndAt,
+    recommendation: recommendation ?? this.recommendation,
   );
 
   Duration remainingAt(DateTime now) {
@@ -40,6 +45,7 @@ class RestState {
     'restStartedAt': restStartedAt.toUtc().toIso8601String(),
     'restDurationSeconds': restDurationSeconds,
     'restExpectedEndAt': restExpectedEndAt.toUtc().toIso8601String(),
+    'recommendation': recommendation?.toJson(),
   };
 
   factory RestState.fromJson(Map<String, dynamic> json) {
@@ -56,6 +62,7 @@ class RestState {
       restStartedAt: startedAt,
       restDurationSeconds: duration,
       restExpectedEndAt: expectedEndAt,
+      recommendation: RestRecommendation.tryFromJson(json['recommendation']),
     );
   }
 }
@@ -72,6 +79,8 @@ class ActiveTrainingSession {
     this.rest,
     this.pausedAt,
     this.resumeState,
+    this.exerciseRestOverrides = const {},
+    this.supersetRestOverrides = const {},
   });
 
   final String id;
@@ -84,6 +93,8 @@ class ActiveTrainingSession {
   final DateTime? pausedAt;
   final TrainingSessionState? resumeState;
   final DateTime updatedAt;
+  final Map<String, int> exerciseRestOverrides;
+  final Map<String, int> supersetRestOverrides;
 
   ActiveTrainingSession copyWith({
     TrainingSession? draft,
@@ -94,6 +105,8 @@ class ActiveTrainingSession {
     DateTime? pausedAt,
     TrainingSessionState? resumeState,
     DateTime? updatedAt,
+    Map<String, int>? exerciseRestOverrides,
+    Map<String, int>? supersetRestOverrides,
     bool clearCurrentExerciseId = false,
     bool clearCurrentSetId = false,
     bool clearRest = false,
@@ -112,6 +125,8 @@ class ActiveTrainingSession {
     pausedAt: clearPausedAt ? null : pausedAt ?? this.pausedAt,
     resumeState: clearResumeState ? null : resumeState ?? this.resumeState,
     updatedAt: updatedAt ?? this.updatedAt,
+    exerciseRestOverrides: exerciseRestOverrides ?? this.exerciseRestOverrides,
+    supersetRestOverrides: supersetRestOverrides ?? this.supersetRestOverrides,
   );
 
   ActiveTrainingSession recoverAt(DateTime now) {
@@ -119,7 +134,6 @@ class ActiveTrainingSession {
         rest?.isFinishedAt(now) == true) {
       return copyWith(
         state: TrainingSessionState.readyForNextSet,
-        clearRest: true,
         updatedAt: now,
       );
     }
@@ -128,7 +142,6 @@ class ActiveTrainingSession {
         rest?.isFinishedAt(now) == true) {
       return copyWith(
         state: TrainingSessionState.readyForNextSet,
-        clearRest: true,
         clearPausedAt: true,
         clearResumeState: true,
         updatedAt: now,
@@ -148,6 +161,8 @@ class ActiveTrainingSession {
     'pausedAt': pausedAt?.toUtc().toIso8601String(),
     'resumeState': resumeState?.storageValue,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
+    'exerciseRestOverrides': exerciseRestOverrides,
+    'supersetRestOverrides': supersetRestOverrides,
   };
 
   factory ActiveTrainingSession.fromJson(Map<String, dynamic> json) {
@@ -175,6 +190,8 @@ class ActiveTrainingSession {
       pausedAt: DateTime.tryParse(stringValue(json['pausedAt'])),
       resumeState: TrainingSessionStateCodec.fromStorage(json['resumeState']),
       updatedAt: updatedAt,
+      exerciseRestOverrides: _secondsMap(json['exerciseRestOverrides']),
+      supersetRestOverrides: _secondsMap(json['supersetRestOverrides']),
     );
   }
 }
@@ -182,4 +199,16 @@ class ActiveTrainingSession {
 String? _nullableString(Object? value) {
   if (value is! String || value.trim().isEmpty) return null;
   return value;
+}
+
+Map<String, int> _secondsMap(Object? value) {
+  if (value is! Map) return const {};
+  final result = <String, int>{};
+  for (final entry in value.entries) {
+    final seconds = entry.value;
+    if (seconds is num && seconds >= 15 && seconds <= 600) {
+      result[entry.key.toString()] = seconds.toInt();
+    }
+  }
+  return Map.unmodifiable(result);
 }

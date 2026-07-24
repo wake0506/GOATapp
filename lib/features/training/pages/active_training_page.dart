@@ -834,14 +834,27 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           shrinkWrap: true,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(8, 8, 8, 10),
-              child: Text(
-                '休息时间',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '修改本动作休息',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'GOAT 推荐 · ${_formatRestSeconds(_session.rest?.recommendation?.recommendedSeconds ?? 90)}',
+                    style: const TextStyle(
+                      color: Color(0xFF008C8C),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
               ),
             ),
-            for (final seconds in const [60, 90, 120, 180])
+            for (final seconds in const [60, 90, 120, 150, 180])
               ListTile(
                 leading: Icon(
                   seconds == (_session.rest?.restDurationSeconds ?? -1)
@@ -918,16 +931,11 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
   }
 
   Future<void> _applyRestDuration(int duration) async {
-    final set = _set;
     final exercise = _exercise;
-    if (set?.id == null || exercise?.exerciseId == null) return;
+    if (exercise?.exerciseId == null) return;
     try {
-      final exerciseUpdated = await widget.engine.updateExerciseRestDuration(
+      final updated = await widget.engine.setCurrentRestOverride(
         exerciseId: exercise!.exerciseId!,
-        durationSeconds: duration,
-      );
-      _setSession(exerciseUpdated);
-      final updated = await widget.engine.updateRestDuration(
         durationSeconds: duration,
       );
       _setSession(updated);
@@ -935,6 +943,31 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
       _showSaveError(error);
     }
   }
+
+  Future<void> _extendRest() async {
+    try {
+      _setSession(await widget.engine.extendCurrentRest());
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  Future<void> _restoreRecommendedRest() async {
+    final exerciseId = _exercise?.exerciseId;
+    if (exerciseId == null) return;
+    try {
+      _setSession(
+        await widget.engine.restoreCurrentRestRecommendation(
+          exerciseId: exerciseId,
+        ),
+      );
+    } catch (error) {
+      _showSaveError(error);
+    }
+  }
+
+  String _formatRestSeconds(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
   String _nextSetLabel() {
     final exercise = _nextPendingExercise;
@@ -973,7 +1006,10 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           nextSetLabel: _nextSetLabel(),
           onStartNextSet: _startNextSet,
           onSkipRest: _skipRest,
-          onChangeDuration: _changeRestDuration,
+          onExtend: _extendRest,
+          onChangeExerciseRest: _changeRestDuration,
+          onRestoreRecommended: _restoreRecommendedRest,
+          recommendation: rest.recommendation,
         ),
         if (nextRecommendation != null) ...[
           const SizedBox(height: 14),

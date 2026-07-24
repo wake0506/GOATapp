@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../../exercise_catalog.dart';
 import '../../../models/progression_target.dart';
+import '../../../models/rest_prescription.dart';
 import '../models/training_template.dart';
+import '../models/exercise_rest_profile_catalog.dart';
 import '../services/training_template_store.dart';
 import 'progression_target_sheet.dart';
+import 'rest_prescription_sheet.dart';
 
 const _marsGreen = Color(0xFF008C8C);
 
@@ -290,6 +293,7 @@ class _TrainingTemplateEditorSheetState
   late String _bodyPart;
   late final List<String> _selectedExerciseIds;
   late final Map<String, ProgressionTarget> _progressionTargets;
+  late final Map<String, RestPrescription> _restPrescriptions;
 
   @override
   void initState() {
@@ -301,6 +305,7 @@ class _TrainingTemplateEditorSheetState
         .toSet()
         .toList(growable: true);
     _progressionTargets = {...?widget.existing?.progressionTargets};
+    _restPrescriptions = {...?widget.existing?.restPrescriptions};
     _bodyPart = _initialBodyPart();
   }
 
@@ -334,6 +339,18 @@ class _TrainingTemplateEditorSheetState
         _progressionTargets[exercise.id] = result.target!;
       }
     });
+  }
+
+  Future<void> _editRest(ExerciseDefinition exercise) async {
+    final result = await RestPrescriptionSheet.show(
+      context,
+      exerciseId: exercise.id,
+      initial:
+          _restPrescriptions[exercise.id] ??
+          const RestPrescription.recommended(),
+    );
+    if (result == null || !mounted) return;
+    setState(() => _restPrescriptions[exercise.id] = result);
   }
 
   @override
@@ -429,17 +446,48 @@ class _TrainingTemplateEditorSheetState
                             : exercise.name,
                       ),
                       subtitle: selected
-                          ? Row(
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(child: Text(exercise.equipment)),
-                                TextButton(
-                                  key: Key('template-target-${exercise.id}'),
-                                  onPressed: () => _editTarget(exercise),
-                                  child: Text(
-                                    _targetLabel(
-                                      _progressionTargets[exercise.id],
+                                Text(exercise.equipment),
+                                Wrap(
+                                  spacing: 4,
+                                  runSpacing: 0,
+                                  children: [
+                                    TextButton(
+                                      key: Key(
+                                        'template-target-${exercise.id}',
+                                      ),
+                                      onPressed: () => _editTarget(exercise),
+                                      style: TextButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 4,
+                                        ),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      child: Text(
+                                        _targetLabel(
+                                          _progressionTargets[exercise.id],
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    TextButton(
+                                      key: Key('template-rest-${exercise.id}'),
+                                      onPressed: () => _editRest(exercise),
+                                      style: TextButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 4,
+                                        ),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      child: Text(
+                                        _restLabel(
+                                          exercise,
+                                          _restPrescriptions[exercise.id],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             )
@@ -476,6 +524,11 @@ class _TrainingTemplateEditorSheetState
                                 if (_progressionTargets[exerciseId] != null)
                                   exerciseId: _progressionTargets[exerciseId]!,
                             }),
+                            restPrescriptions: Map.unmodifiable({
+                              for (final exerciseId in _selectedExerciseIds)
+                                if (_restPrescriptions[exerciseId] != null)
+                                  exerciseId: _restPrescriptions[exerciseId]!,
+                            }),
                           ),
                         );
                       }
@@ -500,10 +553,26 @@ class _TrainingTemplateEditorSheetState
   }
 
   String _targetLabel(ProgressionTarget? target) {
-    if (target == null) return '未设置递进目标 ›';
+    if (target == null) return '递进目标 ›';
     final step = target.weightStepKg == null
         ? ''
         : ' · +${target.weightStepKg}kg';
     return '${target.targetSets}×${target.targetRepMin}–${target.targetRepMax}$step ›';
+  }
+
+  String _restLabel(
+    ExerciseDefinition exercise,
+    RestPrescription? prescription,
+  ) {
+    final value = prescription ?? const RestPrescription.recommended();
+    final seconds =
+        value.validFixedSeconds ??
+        ExerciseRestProfileCatalog.find(exercise.id)?.baseRestSeconds ??
+        90;
+    final duration =
+        '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+    return value.validFixedSeconds == null
+        ? 'GOAT休息 $duration ›'
+        : '固定休息 $duration ›';
   }
 }

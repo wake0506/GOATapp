@@ -1,5 +1,6 @@
 import 'json_value.dart';
 import 'progression_target.dart';
+import 'rest_prescription.dart';
 import '../features/training/domain/training_session_state.dart';
 
 class SetRecord {
@@ -15,6 +16,11 @@ class SetRecord {
   bool? reachedFailure;
   DateTime? completedAt;
   bool replacementPlaceholder;
+  int? recommendedRestSeconds;
+  int? plannedRestSeconds;
+  int? actualRestSeconds;
+  int? restPolicyVersion;
+  RestSource? restSource;
 
   SetRecord({
     this.id,
@@ -29,6 +35,11 @@ class SetRecord {
     this.reachedFailure,
     this.completedAt,
     this.replacementPlaceholder = false,
+    this.recommendedRestSeconds,
+    this.plannedRestSeconds,
+    this.actualRestSeconds,
+    this.restPolicyVersion,
+    this.restSource,
   });
 
   SetRecord copy() => SetRecord(
@@ -44,6 +55,11 @@ class SetRecord {
     reachedFailure: reachedFailure,
     completedAt: completedAt,
     replacementPlaceholder: replacementPlaceholder,
+    recommendedRestSeconds: recommendedRestSeconds,
+    plannedRestSeconds: plannedRestSeconds,
+    actualRestSeconds: actualRestSeconds,
+    restPolicyVersion: restPolicyVersion,
+    restSource: restSource,
   );
 
   double get setVolume => weight * reps;
@@ -65,6 +81,11 @@ class SetRecord {
     'reachedFailure': reachedFailure,
     'completedAt': completedAt?.toUtc().toIso8601String(),
     'replacementPlaceholder': replacementPlaceholder,
+    'recommendedRestSeconds': recommendedRestSeconds,
+    'plannedRestSeconds': plannedRestSeconds,
+    'actualRestSeconds': actualRestSeconds,
+    'restPolicyVersion': restPolicyVersion,
+    'restSource': restSource?.name,
   };
 
   factory SetRecord.fromJson(Map<String, dynamic> json) => SetRecord(
@@ -82,6 +103,15 @@ class SetRecord {
         : null,
     completedAt: DateTime.tryParse(stringValue(json['completedAt'])),
     replacementPlaceholder: json['replacementPlaceholder'] == true,
+    recommendedRestSeconds: _nullableNonNegativeInt(
+      json['recommendedRestSeconds'],
+    ),
+    plannedRestSeconds: _nullableNonNegativeInt(json['plannedRestSeconds']),
+    actualRestSeconds: _nullableNonNegativeInt(json['actualRestSeconds']),
+    restPolicyVersion: _nullableNonNegativeInt(json['restPolicyVersion']),
+    restSource: RestSource.values
+        .where((candidate) => candidate.name == json['restSource'])
+        .firstOrNull,
   );
 }
 
@@ -101,6 +131,7 @@ class TrainingExercise {
   String? substitutedFromExerciseId;
   String? supersetGroupId;
   ProgressionTarget? progressionTarget;
+  RestPrescription? restPrescription;
 
   TrainingExercise({
     this.exerciseId,
@@ -112,6 +143,7 @@ class TrainingExercise {
     this.substitutedFromExerciseId,
     this.supersetGroupId,
     this.progressionTarget,
+    this.restPrescription,
   });
 
   double get totalVolume => sets.fold(0, (sum, set) => sum + set.setVolume);
@@ -126,6 +158,7 @@ class TrainingExercise {
     'substitutedFromExerciseId': substitutedFromExerciseId,
     'supersetGroupId': supersetGroupId,
     'progressionTarget': progressionTarget?.toJson(),
+    'restPrescription': restPrescription?.toJson(),
   };
 
   factory TrainingExercise.fromJson(
@@ -145,6 +178,7 @@ class TrainingExercise {
     ),
     supersetGroupId: _nullableString(json['supersetGroupId']),
     progressionTarget: ProgressionTarget.tryFromJson(json['progressionTarget']),
+    restPrescription: RestPrescription.tryFromJson(json['restPrescription']),
   );
 }
 
@@ -163,6 +197,12 @@ double? _validRpe(Object? value) {
   if (value is! num) return null;
   final rpe = value.toDouble();
   return rpe >= 1 && rpe <= 10 ? rpe : null;
+}
+
+int? _nullableNonNegativeInt(Object? value) {
+  if (value is! num) return null;
+  final parsed = value.toInt();
+  return parsed < 0 ? null : parsed;
 }
 
 class TrainingSession {
@@ -198,4 +238,11 @@ class TrainingSession {
             .map(TrainingExercise.fromJson)
             .toList(),
       );
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
+    return iterator.moveNext() ? iterator.current : null;
+  }
 }

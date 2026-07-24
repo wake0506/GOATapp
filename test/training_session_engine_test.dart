@@ -273,10 +273,10 @@ void main() {
       clock = now.add(const Duration(seconds: 121));
       final expired = await engine.restore();
       expect(expired?.state, TrainingSessionState.readyForNextSet);
-      expect(expired?.rest, isNull);
+      expect(expired?.rest?.restStartedAt, now);
     });
 
-    test('exercise rest duration updates every set in that exercise', () async {
+    test('exercise rest duration persists as a session override', () async {
       final session = active(
         state: TrainingSessionState.resting,
         rest: RestState(
@@ -300,9 +300,10 @@ void main() {
         durationSeconds: 150,
       );
 
+      expect(updated.exerciseRestOverrides['bench_press_barbell'], 150);
       expect(
         updated.draft.exercises.single.sets.map((set) => set.restSeconds),
-        everyElement(150),
+        everyElement(90),
       );
     });
 
@@ -327,7 +328,7 @@ void main() {
 
         final updated = await engine.updateRestDuration(durationSeconds: 60);
         expect(updated.state, TrainingSessionState.readyForNextSet);
-        expect(updated.rest, isNull);
+        expect(updated.rest, isNotNull);
       },
     );
 

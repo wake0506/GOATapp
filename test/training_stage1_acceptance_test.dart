@@ -148,14 +148,14 @@ void main() {
       engine = TrainingSessionEngine(repository: repository, clock: () => now);
       var restored = await engine.restore();
       expect(restored?.state, TrainingSessionState.resting);
-      expect(restored?.rest?.remainingAt(now).inSeconds, 60);
+      expect(restored?.rest?.remainingAt(now).inSeconds, 120);
       expect(restored?.currentSetId, 'bench-1');
       expect(
         restored?.draft.exercises.single.sets.first.completedAt,
         isNotNull,
       );
 
-      now = now.add(const Duration(seconds: 61));
+      now = now.add(const Duration(seconds: 121));
       restored = await engine.restore();
       expect(restored?.state, TrainingSessionState.readyForNextSet);
       restored = await engine.startNextAvailableSet();

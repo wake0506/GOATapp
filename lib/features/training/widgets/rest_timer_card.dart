@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../models/rest_prescription.dart';
+
 class RestTimerCard extends StatelessWidget {
   const RestTimerCard({
     super.key,
@@ -9,7 +11,10 @@ class RestTimerCard extends StatelessWidget {
     required this.nextSetLabel,
     required this.onStartNextSet,
     required this.onSkipRest,
-    required this.onChangeDuration,
+    required this.onExtend,
+    required this.onChangeExerciseRest,
+    required this.onRestoreRecommended,
+    this.recommendation,
   });
 
   final int remainingSeconds;
@@ -18,12 +23,71 @@ class RestTimerCard extends StatelessWidget {
   final String nextSetLabel;
   final VoidCallback onStartNextSet;
   final VoidCallback onSkipRest;
-  final VoidCallback onChangeDuration;
+  final VoidCallback onExtend;
+  final VoidCallback onChangeExerciseRest;
+  final VoidCallback onRestoreRecommended;
+  final RestRecommendation? recommendation;
 
   String _formatSeconds(int seconds) {
     final minutes = seconds ~/ 60;
     final remainder = seconds % 60;
     return '${minutes.toString().padLeft(2, '0')}:${remainder.toString().padLeft(2, '0')}';
+  }
+
+  String get _recommendationLabel {
+    final value = recommendation;
+    if (value == null) return '计划 ${_formatSeconds(totalSeconds)}';
+    if (value.source == RestSource.templateFixed) {
+      return '固定 ${_formatSeconds(value.plannedSeconds)}';
+    }
+    return 'GOAT 推荐 · ${_formatSeconds(value.recommendedSeconds)}';
+  }
+
+  String get _reasonLabel {
+    final reasons = recommendation?.reasonCodes ?? const <RestReasonCode>[];
+    const labels = {
+      RestReasonCode.olympicPower: '高技术爆发动作',
+      RestReasonCode.heavyCompound: '重型复合动作',
+      RestReasonCode.standardCompound: '复合动作',
+      RestReasonCode.machineCompound: '器械复合动作',
+      RestReasonCode.isolation: '孤立动作',
+      RestReasonCode.smallMuscleIsolation: '小肌群动作',
+      RestReasonCode.warmupLowLoad: '低负荷热身组',
+      RestReasonCode.warmupMediumLoad: '热身组',
+      RestReasonCode.warmupHighLoad: '高负荷热身组',
+      RestReasonCode.finalWarmup: '最后热身组，准备正式组',
+      RestReasonCode.rirOne: '本组接近力竭，已延长 0:30',
+      RestReasonCode.rirZero: '本组接近力竭，已延长 1:00',
+      RestReasonCode.reachedFailure: '本组达到力竭，已延长恢复',
+      RestReasonCode.dropSet: '递减组，已延长恢复',
+      RestReasonCode.amrapSet: 'AMRAP 组，已延长恢复',
+      RestReasonCode.failureSet: '力竭组，已延长恢复',
+      RestReasonCode.exerciseTransition: '动作切换恢复',
+      RestReasonCode.sameBodyPartTransition: '同部位动作切换',
+      RestReasonCode.differentBodyPartTransition: '不同部位动作切换',
+      RestReasonCode.nextHeavyExercise: '即将进入重型动作',
+      RestReasonCode.supersetTransition: '超级组动作切换',
+      RestReasonCode.supersetCycleRest: '超级组循环恢复',
+      RestReasonCode.userFixed: '训练方案固定时间',
+      RestReasonCode.sessionOverride: '本次训练设置',
+    };
+    for (final preferred in const [
+      RestReasonCode.sessionOverride,
+      RestReasonCode.rirZero,
+      RestReasonCode.reachedFailure,
+      RestReasonCode.failureSet,
+      RestReasonCode.finalWarmup,
+      RestReasonCode.nextHeavyExercise,
+      RestReasonCode.supersetCycleRest,
+      RestReasonCode.sameBodyPartTransition,
+      RestReasonCode.differentBodyPartTransition,
+      RestReasonCode.rirOne,
+      RestReasonCode.dropSet,
+      RestReasonCode.amrapSet,
+    ]) {
+      if (reasons.contains(preferred)) return labels[preferred]!;
+    }
+    return reasons.isEmpty ? '按当前训练情境安排' : labels[reasons.first]!;
   }
 
   @override
@@ -60,6 +124,57 @@ class RestTimerCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+              Container(
+                key: const Key('rest-recommendation-explanation'),
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF3F1),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      _recommendationLabel,
+                      style: const TextStyle(
+                        color: Color(0xFF008C8C),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _reasonLabel,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF68716F),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  key: const Key('rest-extend-30'),
+                  onPressed: onExtend,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF008C8C),
+                    side: const BorderSide(color: Color(0xFFD5E3E0)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('+30 秒 · 仅本次'),
+                ),
+              ),
+              const SizedBox(height: 12),
               SizedBox(
                 width: 184,
                 height: 184,
@@ -166,8 +281,46 @@ class RestTimerCard extends StatelessWidget {
                   ),
                   TextButton(
                     key: const Key('rest-duration-button'),
-                    onPressed: onChangeDuration,
-                    child: const Text('修改休息时间'),
+                    onPressed: () => showModalBottomSheet<void>(
+                      context: context,
+                      backgroundColor: Colors.white,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(24),
+                        ),
+                      ),
+                      builder: (sheetContext) => SafeArea(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ListTile(
+                                key: const Key('rest-change-exercise-duration'),
+                                leading: const Icon(Icons.tune),
+                                title: const Text('修改本动作休息'),
+                                subtitle: const Text('本次训练后续组继续使用'),
+                                onTap: () {
+                                  Navigator.pop(sheetContext);
+                                  onChangeExerciseRest();
+                                },
+                              ),
+                              if (recommendation?.isUserOverridden == true)
+                                ListTile(
+                                  key: const Key('rest-restore-recommendation'),
+                                  leading: const Icon(Icons.refresh),
+                                  title: const Text('恢复 GOAT 推荐'),
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    onRestoreRecommended();
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    child: const Text('更多'),
                   ),
                 ],
               ),

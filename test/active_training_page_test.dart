@@ -467,7 +467,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('rest-timer-card')), findsOneWidget);
 
-    clock = now.add(const Duration(seconds: 90));
+    clock = now.add(const Duration(seconds: 150));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(
@@ -478,7 +478,7 @@ void main() {
   });
 
   testWidgets(
-    'rest duration sheet applies preset to timer and every exercise set',
+    'rest duration sheet applies a persistent session exercise override',
     (tester) async {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.binding.setSurfaceSize(const Size(390, 844));
@@ -495,15 +495,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('rest-duration-button')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('rest-change-exercise-duration')));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('120 秒'));
       await tester.pumpAndSettle();
 
       final active = await setup.repository.loadActiveSession();
       expect(active?.rest?.restDurationSeconds, 120);
-      expect(
-        active?.draft.exercises.single.sets.map((set) => set.restSeconds),
-        everyElement(120),
-      );
+      expect(active?.exerciseRestOverrides[bench.id], 120);
     },
   );
 

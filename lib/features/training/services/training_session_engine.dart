@@ -1,8 +1,11 @@
 import '../../../models/training.dart';
+import '../../../models/rest_prescription.dart';
 import '../../../repositories/training_repository.dart';
 import '../domain/active_training_session.dart';
 import '../domain/training_session_state.dart';
 import '../domain/training_session_state_machine.dart';
+import '../models/exercise_rest_profile_catalog.dart';
+import 'rest_prescription_engine.dart';
 import 'superset_service.dart';
 import 'warmup_suggestion_service.dart';
 
@@ -12,15 +15,19 @@ class TrainingSessionEngine {
     TrainingSessionStateMachine stateMachine =
         const TrainingSessionStateMachine(),
     SupersetService supersetService = const SupersetService(),
+    RestPrescriptionEngine restPrescriptionEngine =
+        const RestPrescriptionEngine(),
     DateTime Function()? clock,
   }) : _repository = repository,
        _stateMachine = stateMachine,
        _supersetService = supersetService,
+       _restPrescriptionEngine = restPrescriptionEngine,
        _clock = clock ?? DateTime.now;
 
   final TrainingRepository _repository;
   final TrainingSessionStateMachine _stateMachine;
   final SupersetService _supersetService;
+  final RestPrescriptionEngine _restPrescriptionEngine;
   final DateTime Function() _clock;
 
   Future<ActiveTrainingSession> startSession({
@@ -130,19 +137,92 @@ class TrainingSessionEngine {
       completed = await nextSet();
       return startSet(exerciseId: partner.exerciseId, setId: partner.setId);
     }
-    if (_hasPendingSets(completed.draft)) {
-      return startRest(
-        setId: setId,
-        durationSeconds: set.restSeconds > 0 ? set.restSeconds : 90,
-      );
-    }
-    return completed;
+    if (!_hasPendingSets(completed.draft)) return completed;
+
+    final nextTarget = _nextPendingTarget(completed);
+    if (nextTarget == null) return completed;
+    final nextExercise = _findExercise(completed.draft, nextTarget.exerciseId);
+    final hasPendingInCurrent = exercise.sets.any(
+      (candidate) =>
+          candidate.completedAt == null && !candidate.replacementPlaceholder,
+    );
+    final supersetMembers = _supersetService.membersFor(
+      completed.draft,
+      exercise.exerciseId!,
+    );
+    final isSupersetCycle =
+        supersetMembers.length == 2 &&
+        supersetMembers.last.exerciseId == exercise.exerciseId &&
+        set.resolvedSetType == TrainingSetType.superset;
+    final partnerExercise = isSupersetCycle ? supersetMembers.first : null;
+    final partnerSet = partnerExercise == null
+        ? null
+        : _setAtMatchingOrdinal(
+            source: exercise,
+            sourceSetId: setId,
+            target: partnerExercise,
+          );
+    final isFinalWarmup =
+        set.resolvedSetType == TrainingSetType.warmup &&
+        !exercise.sets
+            .skipWhile((candidate) => candidate.id != setId)
+            .skip(1)
+            .any(
+              (candidate) =>
+                  candidate.completedAt == null &&
+                  candidate.resolvedSetType == TrainingSetType.warmup,
+            );
+    final recommendation = _restPrescriptionEngine.recommend(
+      RestPrescriptionRequest(
+        currentProfile: ExerciseRestProfileCatalog.find(exercise.exerciseId),
+        setType: set.resolvedSetType,
+        rir: set.rir,
+        reachedFailure: set.reachedFailure == true,
+        currentWeight: set.weight,
+        referenceWorkingWeight: _referenceWorkingWeight(exercise),
+        isFinalWarmup: isFinalWarmup,
+        isLastSetOfExercise: !hasPendingInCurrent,
+        currentBodyPart: exercise.bodyPart,
+        nextProfile: ExerciseRestProfileCatalog.find(nextExercise?.exerciseId),
+        nextBodyPart: nextExercise?.bodyPart,
+        nextExerciseId: nextExercise?.exerciseId,
+        prescription:
+            exercise.restPrescription ?? const RestPrescription.recommended(),
+        sessionExerciseOverrideSeconds:
+            completed.exerciseRestOverrides[exercise.exerciseId],
+        isSupersetCycle: isSupersetCycle,
+        supersetPartnerProfile: ExerciseRestProfileCatalog.find(
+          partnerExercise?.exerciseId,
+        ),
+        supersetPartnerPrescription: partnerExercise?.restPrescription,
+        supersetPartnerFatigueModifier: partnerSet == null
+            ? 0
+            : _restPrescriptionEngine.fatigueModifier(
+                setType: partnerSet.resolvedSetType,
+                rir: partnerSet.rir,
+                reachedFailure: partnerSet.reachedFailure == true,
+              ),
+        supersetGroupOverrideSeconds: exercise.supersetGroupId == null
+            ? null
+            : completed.supersetRestOverrides[exercise.supersetGroupId],
+      ),
+    );
+    if (!recommendation.shouldStartTimer) return completed;
+    return startRest(
+      setId: setId,
+      durationSeconds: recommendation.plannedSeconds,
+      recommendation: recommendation,
+    );
   }
 
   Future<ActiveTrainingSession> startNextAvailableSet() async {
-    final active = await _requiredActive();
+    var active = await _requiredActive();
     if (active.state != TrainingSessionState.readyForNextSet) {
       throw StateError('The session is not ready for the next set.');
+    }
+    if (active.rest != null) {
+      active = _finalizeActualRest(active, at: _clock(), clearRest: true);
+      await _repository.saveActiveSession(active);
     }
     SupersetSetTarget? target;
     if (active.currentExerciseId != null && active.currentSetId != null) {
@@ -154,7 +234,12 @@ class TrainingSessionEngine {
     }
     target ??= _nextPendingTarget(active);
     if (target == null) return active;
-    return startSet(exerciseId: target.exerciseId, setId: target.setId);
+    return _transitionFrom(
+      active,
+      TrainingSessionEvent.startSet,
+      currentExerciseId: target.exerciseId,
+      currentSetId: target.setId,
+    );
   }
 
   Future<ActiveTrainingSession> updateSet({
@@ -230,18 +315,36 @@ class TrainingSessionEngine {
   Future<ActiveTrainingSession> startRest({
     required String setId,
     required int durationSeconds,
+    RestRecommendation? recommendation,
   }) async {
     if (durationSeconds < 0) {
       throw ArgumentError.value(durationSeconds, 'durationSeconds');
     }
     final now = _clock();
-    return _transition(
+    final active = await _requiredActive();
+    final set = _findSet(active.draft, setId);
+    if (set == null) throw StateError('Set $setId was not found in the draft.');
+    final resolvedRecommendation =
+        recommendation ??
+        RestRecommendation(
+          recommendedSeconds: durationSeconds,
+          plannedSeconds: durationSeconds,
+          baseSeconds: durationSeconds,
+          modifierSeconds: 0,
+          source: RestSource.legacyFallback,
+          reasonCodes: const [],
+          transitionType: RestTransitionType.betweenSets,
+        );
+    _recordRestPlan(set, resolvedRecommendation);
+    return _transitionFrom(
+      active,
       TrainingSessionEvent.startRest,
       currentSetId: setId,
       rest: RestState(
         setId: setId,
         restStartedAt: now,
         restDurationSeconds: durationSeconds,
+        recommendation: resolvedRecommendation,
       ),
     );
   }
@@ -261,23 +364,43 @@ class TrainingSessionEngine {
     final expectedEnd = rest.restStartedAt.add(
       Duration(seconds: durationSeconds),
     );
-    if (!expectedEnd.isAfter(now)) return restFinished();
     final updated = active.copyWith(
       rest: rest.copyWith(
         restDurationSeconds: durationSeconds,
         restExpectedEndAt: expectedEnd,
+        recommendation: _withPlannedSeconds(
+          rest.recommendation,
+          durationSeconds,
+        ),
       ),
       updatedAt: now,
     );
+    final set = _findSet(updated.draft, rest.setId);
+    if (set != null) {
+      set
+        ..restSeconds = durationSeconds
+        ..plannedRestSeconds = durationSeconds;
+    }
     await _repository.saveActiveSession(updated);
+    if (!expectedEnd.isAfter(now)) {
+      return _transitionFrom(updated, TrainingSessionEvent.restFinished);
+    }
     return updated;
   }
 
   Future<ActiveTrainingSession> updateExerciseRestDuration({
     required String exerciseId,
     required int durationSeconds,
+  }) => setExerciseRestOverride(
+    exerciseId: exerciseId,
+    durationSeconds: durationSeconds,
+  );
+
+  Future<ActiveTrainingSession> setExerciseRestOverride({
+    required String exerciseId,
+    required int durationSeconds,
   }) async {
-    if (durationSeconds < 0) {
+    if (durationSeconds < 15 || durationSeconds > 600) {
       throw ArgumentError.value(durationSeconds, 'durationSeconds');
     }
     final active = await _requiredActive();
@@ -287,23 +410,215 @@ class TrainingSessionEngine {
     if (exercise == null) {
       throw StateError('Exercise $exerciseId was not found in the draft.');
     }
-    for (final set in exercise.sets) {
-      if (!set.replacementPlaceholder) set.restSeconds = durationSeconds;
-    }
-    return _saveDraftChange(active);
+    return _saveDraftChange(
+      active.copyWith(
+        exerciseRestOverrides: Map.unmodifiable({
+          ...active.exerciseRestOverrides,
+          exerciseId: durationSeconds,
+        }),
+      ),
+    );
   }
 
-  Future<ActiveTrainingSession> skipRest() =>
-      _transition(TrainingSessionEvent.skipRest, clearRest: true);
+  Future<ActiveTrainingSession> clearExerciseRestOverride({
+    required String exerciseId,
+  }) async {
+    final active = await _requiredActive();
+    final overrides = {...active.exerciseRestOverrides}..remove(exerciseId);
+    return _saveDraftChange(
+      active.copyWith(exerciseRestOverrides: Map.unmodifiable(overrides)),
+    );
+  }
+
+  Future<ActiveTrainingSession> setSupersetRestOverride({
+    required String groupId,
+    required int durationSeconds,
+  }) async {
+    if (durationSeconds < 15 || durationSeconds > 600) {
+      throw ArgumentError.value(durationSeconds, 'durationSeconds');
+    }
+    final active = await _requiredActive();
+    return _saveDraftChange(
+      active.copyWith(
+        supersetRestOverrides: Map.unmodifiable({
+          ...active.supersetRestOverrides,
+          groupId: durationSeconds,
+        }),
+      ),
+    );
+  }
+
+  Future<ActiveTrainingSession> clearSupersetRestOverride({
+    required String groupId,
+  }) async {
+    final active = await _requiredActive();
+    final overrides = {...active.supersetRestOverrides}..remove(groupId);
+    return _saveDraftChange(
+      active.copyWith(supersetRestOverrides: Map.unmodifiable(overrides)),
+    );
+  }
+
+  Future<ActiveTrainingSession> setCurrentRestOverride({
+    required String exerciseId,
+    required int durationSeconds,
+  }) async {
+    if (durationSeconds < 15 || durationSeconds > 600) {
+      throw ArgumentError.value(durationSeconds, 'durationSeconds');
+    }
+    var active = await _requiredActive();
+    final rest = active.rest;
+    if (active.state != TrainingSessionState.resting || rest == null) {
+      throw StateError('No active rest timer.');
+    }
+    final recommendation =
+        rest.recommendation ??
+        RestRecommendation(
+          recommendedSeconds: rest.restDurationSeconds,
+          plannedSeconds: rest.restDurationSeconds,
+          baseSeconds: rest.restDurationSeconds,
+          modifierSeconds: 0,
+          source: RestSource.legacyFallback,
+          reasonCodes: const [],
+          transitionType: RestTransitionType.betweenSets,
+        );
+    final exercise = _findExercise(active.draft, exerciseId);
+    final isSupersetCycle =
+        recommendation.transitionType == RestTransitionType.supersetCycle &&
+        exercise?.supersetGroupId != null;
+    if (isSupersetCycle) {
+      active = active.copyWith(
+        supersetRestOverrides: Map.unmodifiable({
+          ...active.supersetRestOverrides,
+          exercise!.supersetGroupId!: durationSeconds,
+        }),
+      );
+    } else {
+      active = active.copyWith(
+        exerciseRestOverrides: Map.unmodifiable({
+          ...active.exerciseRestOverrides,
+          exerciseId: durationSeconds,
+        }),
+      );
+    }
+    final updatedRecommendation = RestRecommendation(
+      recommendedSeconds: recommendation.recommendedSeconds,
+      plannedSeconds: durationSeconds,
+      baseSeconds: recommendation.baseSeconds,
+      modifierSeconds: recommendation.modifierSeconds,
+      source: isSupersetCycle
+          ? RestSource.supersetOverride
+          : RestSource.sessionExerciseOverride,
+      reasonCodes: {
+        ...recommendation.reasonCodes,
+        RestReasonCode.sessionOverride,
+      }.toList(growable: false),
+      transitionType: recommendation.transitionType,
+      policyVersion: recommendation.policyVersion,
+      isUserOverridden: true,
+      nextExerciseId: recommendation.nextExerciseId,
+    );
+    return _saveCurrentRest(
+      active,
+      durationSeconds: durationSeconds,
+      recommendation: updatedRecommendation,
+    );
+  }
+
+  Future<ActiveTrainingSession> restoreCurrentRestRecommendation({
+    required String exerciseId,
+  }) async {
+    var active = await _requiredActive();
+    final rest = active.rest;
+    final recommendation = rest?.recommendation;
+    if (active.state != TrainingSessionState.resting ||
+        rest == null ||
+        recommendation == null) {
+      throw StateError('No active prescribed rest timer.');
+    }
+    final exercise = _findExercise(active.draft, exerciseId);
+    final isSupersetCycle =
+        recommendation.transitionType == RestTransitionType.supersetCycle &&
+        exercise?.supersetGroupId != null;
+    if (isSupersetCycle) {
+      final overrides = {...active.supersetRestOverrides}
+        ..remove(exercise!.supersetGroupId);
+      active = active.copyWith(
+        supersetRestOverrides: Map.unmodifiable(overrides),
+      );
+    } else {
+      final overrides = {...active.exerciseRestOverrides}..remove(exerciseId);
+      active = active.copyWith(
+        exerciseRestOverrides: Map.unmodifiable(overrides),
+      );
+    }
+    final fixed = isSupersetCycle
+        ? null
+        : exercise?.restPrescription?.validFixedSeconds;
+    final planned = fixed ?? recommendation.recommendedSeconds;
+    final reasons = recommendation.reasonCodes
+        .where((reason) => reason != RestReasonCode.sessionOverride)
+        .toSet()
+        .toList(growable: true);
+    if (fixed != null && !reasons.contains(RestReasonCode.userFixed)) {
+      reasons.add(RestReasonCode.userFixed);
+    }
+    final updatedRecommendation = RestRecommendation(
+      recommendedSeconds: recommendation.recommendedSeconds,
+      plannedSeconds: planned,
+      baseSeconds: recommendation.baseSeconds,
+      modifierSeconds: fixed == null ? recommendation.modifierSeconds : 0,
+      source: fixed != null
+          ? RestSource.templateFixed
+          : RestSource.exerciseProfile,
+      reasonCodes: reasons,
+      transitionType: recommendation.transitionType,
+      policyVersion: recommendation.policyVersion,
+      nextExerciseId: recommendation.nextExerciseId,
+    );
+    return _saveCurrentRest(
+      active,
+      durationSeconds: planned,
+      recommendation: updatedRecommendation,
+    );
+  }
+
+  Future<ActiveTrainingSession> skipRest() async {
+    final active = await _requiredActive();
+    final finalized = _finalizeActualRest(active, at: _clock());
+    return _transitionFrom(
+      finalized,
+      TrainingSessionEvent.skipRest,
+      clearRest: true,
+    );
+  }
 
   Future<ActiveTrainingSession> restFinished() =>
-      _transition(TrainingSessionEvent.restFinished, clearRest: true);
+      _transition(TrainingSessionEvent.restFinished);
 
-  Future<ActiveTrainingSession> nextSet() => _transition(
-    TrainingSessionEvent.nextSet,
-    clearRest: true,
-    clearCurrentSetId: true,
-  );
+  Future<ActiveTrainingSession> nextSet() async {
+    var active = await _requiredActive();
+    if (active.rest != null) {
+      active = _finalizeActualRest(active, at: _clock());
+    }
+    return _transitionFrom(
+      active,
+      TrainingSessionEvent.nextSet,
+      clearRest: true,
+      clearCurrentSetId: true,
+    );
+  }
+
+  Future<ActiveTrainingSession> extendCurrentRest({int seconds = 30}) async {
+    if (seconds <= 0) throw ArgumentError.value(seconds, 'seconds');
+    final active = await _requiredActive();
+    final rest = active.rest;
+    if (active.state != TrainingSessionState.resting || rest == null) {
+      throw StateError('No active rest timer.');
+    }
+    return updateRestDuration(
+      durationSeconds: (rest.restDurationSeconds + seconds).clamp(15, 600),
+    );
+  }
 
   Future<ActiveTrainingSession> pause() async {
     final active = await _requiredActive();
@@ -339,7 +654,8 @@ class TrainingSessionEngine {
       ..substitutedFromExerciseId = originalExerciseId
       ..status = TrainingExerciseStatus.planned
       ..orderIndex = original.orderIndex
-      ..supersetGroupId = original.supersetGroupId;
+      ..supersetGroupId = original.supersetGroupId
+      ..restPrescription ??= original.restPrescription;
     for (
       var index = 0;
       index < original.sets.length && index < replacement.sets.length;
@@ -517,7 +833,11 @@ class TrainingSessionEngine {
   }
 
   Future<TrainingSession> finishSession() async {
-    final active = await _requiredActive();
+    var active = await _requiredActive();
+    if (active.rest != null) {
+      active = _finalizeActualRest(active, at: _clock(), clearRest: true);
+      await _repository.saveActiveSession(active);
+    }
     for (final exercise in active.draft.exercises) {
       exercise.sets.removeWhere(
         (set) => set.completedAt == null || set.replacementPlaceholder,
@@ -634,6 +954,102 @@ class TrainingSessionEngine {
       draft.exercises
           .where((exercise) => exercise.sets.any((set) => set.id == setId))
           .firstOrNull;
+
+  TrainingExercise? _findExercise(TrainingSession draft, String exerciseId) =>
+      draft.exercises
+          .where(
+            (exercise) =>
+                exercise.exerciseId == exerciseId &&
+                exercise.status != TrainingExerciseStatus.replaced,
+          )
+          .firstOrNull;
+
+  SetRecord? _setAtMatchingOrdinal({
+    required TrainingExercise source,
+    required String sourceSetId,
+    required TrainingExercise target,
+  }) {
+    final ordinal = source.sets.indexWhere((set) => set.id == sourceSetId);
+    if (ordinal < 0 || ordinal >= target.sets.length) return null;
+    return target.sets[ordinal];
+  }
+
+  double? _referenceWorkingWeight(TrainingExercise exercise) {
+    final weights = exercise.sets
+        .where(
+          (set) =>
+              set.resolvedSetType != TrainingSetType.warmup && set.weight > 0,
+        )
+        .map((set) => set.weight)
+        .toList(growable: false);
+    if (weights.isEmpty) return null;
+    return weights.reduce((left, right) => left > right ? left : right);
+  }
+
+  void _recordRestPlan(SetRecord set, RestRecommendation recommendation) {
+    set
+      ..recommendedRestSeconds = recommendation.recommendedSeconds
+      ..plannedRestSeconds = recommendation.plannedSeconds
+      ..restSeconds = recommendation.plannedSeconds
+      ..restPolicyVersion = recommendation.policyVersion
+      ..restSource = recommendation.source;
+  }
+
+  Future<ActiveTrainingSession> _saveCurrentRest(
+    ActiveTrainingSession active, {
+    required int durationSeconds,
+    required RestRecommendation recommendation,
+  }) async {
+    final rest = active.rest;
+    if (rest == null) throw StateError('No active rest timer.');
+    final updated = active.copyWith(
+      rest: rest.copyWith(
+        restDurationSeconds: durationSeconds,
+        restExpectedEndAt: rest.restStartedAt.add(
+          Duration(seconds: durationSeconds),
+        ),
+        recommendation: recommendation,
+      ),
+      updatedAt: _clock(),
+    );
+    final set = _findSet(updated.draft, rest.setId);
+    if (set != null) _recordRestPlan(set, recommendation);
+    await _repository.saveActiveSession(updated);
+    return updated;
+  }
+
+  ActiveTrainingSession _finalizeActualRest(
+    ActiveTrainingSession active, {
+    required DateTime at,
+    bool clearRest = false,
+  }) {
+    final rest = active.rest;
+    if (rest == null) return active;
+    final elapsed = at.difference(rest.restStartedAt).inSeconds;
+    final set = _findSet(active.draft, rest.setId);
+    if (set != null) set.actualRestSeconds = elapsed < 0 ? 0 : elapsed;
+    return active.copyWith(clearRest: clearRest, updatedAt: at);
+  }
+
+  RestRecommendation? _withPlannedSeconds(
+    RestRecommendation? recommendation,
+    int seconds,
+  ) {
+    if (recommendation == null) return null;
+    return RestRecommendation(
+      recommendedSeconds: recommendation.recommendedSeconds,
+      plannedSeconds: seconds,
+      baseSeconds: recommendation.baseSeconds,
+      modifierSeconds: recommendation.modifierSeconds,
+      source: recommendation.source,
+      reasonCodes: recommendation.reasonCodes,
+      transitionType: recommendation.transitionType,
+      policyVersion: recommendation.policyVersion,
+      isUserOverridden: recommendation.isUserOverridden,
+      nextExerciseId: recommendation.nextExerciseId,
+      shouldStartTimer: recommendation.shouldStartTimer,
+    );
+  }
 
   void _copyPreviousSetPerformance(
     TrainingSession draft, {

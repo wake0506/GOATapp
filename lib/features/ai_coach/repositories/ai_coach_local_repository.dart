@@ -80,6 +80,61 @@ class AiCoachLocalRepository {
     return next;
   }
 
+  Future<AiCoachState> setUserProfileValue({
+    required AiProfileCategory category,
+    String? value,
+    DateTime? now,
+  }) async {
+    final state = load();
+    final stableKey = 'user_profile_${category.name}';
+    final existing = state.memories
+        .where(
+          (item) =>
+              item.stableKey == stableKey &&
+              item.sourceType == AiMemorySourceType.userProvided,
+        )
+        .firstOrNull;
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      if (existing == null) return state;
+      final next = state.copyWith(
+        memories: _upsert(
+          state.memories,
+          existing.copyWith(
+            status: AiMemoryStatus.archived,
+            updatedAt: now ?? DateTime.now(),
+          ),
+        ),
+      );
+      await save(next);
+      return next;
+    }
+
+    final timestamp = now ?? DateTime.now();
+    final item = AiMemoryItem(
+      id: existing?.id ?? stableKey,
+      stableKey: stableKey,
+      category: category,
+      value: trimmed,
+      sourceType: AiMemorySourceType.userProvided,
+      status: AiMemoryStatus.active,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      sourceRefs: const [
+        AiMemorySourceRef(
+          type: 'user_input',
+          id: 'profile_account_center',
+          label: '你在个人主页中主动设置',
+        ),
+      ],
+      confidenceLevel: AiMemoryConfidence.high,
+      userConfirmed: true,
+    );
+    final next = state.copyWith(memories: _upsert(state.memories, item));
+    await save(next);
+    return next;
+  }
+
   Future<AiCoachState> addInference(AiMemoryItem inference) async {
     if (inference.sourceType != AiMemorySourceType.aiInferred) {
       throw ArgumentError('Only AI-inferred memories can be added here.');

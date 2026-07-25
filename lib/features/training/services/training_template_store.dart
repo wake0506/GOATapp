@@ -53,6 +53,13 @@ class TrainingTemplateStore {
     await _write(load().where((item) => item.id != templateId).toList());
   }
 
+  Future<void> clear() async {
+    final removed = await _preferences.remove(_key);
+    if (!removed && _preferences.containsKey(_key)) {
+      throw StateError('训练方案本地命名空间清理失败');
+    }
+  }
+
   Future<void> _write(List<TrainingTemplate> templates) async {
     final saved = await _preferences.setString(
       _key,

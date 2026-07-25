@@ -53,11 +53,21 @@ import 'features/analytics/widgets/weight_trend_summary.dart';
 import 'features/history/widgets/history_calendar_day.dart';
 import 'features/ai_coach/pages/ai_profile_page.dart';
 import 'features/ai_coach/repositories/ai_coach_local_repository.dart';
+import 'features/ai_coach/models/ai_coach_state.dart';
+import 'features/ai_coach/models/ai_memory.dart';
+import 'features/profile/models/profile_summary.dart';
+import 'features/profile/pages/account_center_pages.dart';
+import 'features/profile/pages/profile_page.dart';
+import 'features/profile/services/account_deletion_service.dart';
+import 'features/profile/services/json_file_delivery.dart';
+import 'features/profile/services/profile_summary_service.dart';
+import 'features/profile/services/user_data_export_service.dart';
 import 'widgets/goat_page_header.dart';
 import 'features/water/water_tracking_page.dart';
 import 'repositories/nutrition_repository.dart';
 import 'repositories/water_tracking_repository.dart';
 import 'repositories/local_training_repository.dart';
+import 'repositories/in_memory_training_repository.dart';
 import 'services/cloud_sync_service.dart';
 import 'services/local_storage_service.dart';
 import 'services/nutrition_ai_service.dart';
@@ -2408,80 +2418,17 @@ class _MainTabControllerState extends State<MainTabController>
   }
 
   Future<void> _signOut() async {
+    final namespaceBeforeSignOut = _activeNamespace;
+    await _saveLocalPreferencesOnly();
     await supabase.auth.signOut();
-    _activeUserId = null;
-    _activeNamespace = _storage?.namespaceForUser(null) ?? 'guest';
-    _applySnapshot(_storage?.load(_activeNamespace) ?? AppSnapshot.empty());
-  }
-
-  // 🌟 新增功能：合规注销账号
-  Future<void> _deleteAccount() async {
-    // 1. 弹出二次确认极其危险的操作
-    bool confirm =
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: Colors.white,
-            title: const Row(
-              children: [
-                Icon(Icons.warning_rounded, color: Colors.red),
-                SizedBox(width: 8),
-                Text('注销账号'),
-              ],
-            ),
-            content: const Text(
-              '警告：此操作不可逆！\n您的账号以及所有云端的饮食、运动、个人配置数据将被彻底永久删除。',
-              style: TextStyle(height: 1.5),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消', style: TextStyle(color: Colors.grey)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('确认彻底注销'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (!confirm) return;
-
-    try {
-      final namespaceToClear = _activeUserId == null ? null : _activeNamespace;
-      // 2. 调用后端特权 RPC 函数删库跑路
-      await supabase.rpc('delete_user');
-      // 3. 退出当前登录状态并清空本地缓存
-      await supabase.auth.signOut();
-      if (namespaceToClear != null) {
-        await _storage?.clearNamespace(namespaceToClear);
-      }
-      if (namespaceToClear != null && _storage != null) {
-        await AiCoachLocalRepository(
-          preferences: _storage!.prefs,
-          namespace: namespaceToClear,
-        ).clear();
-      }
+    if (_activeNamespace == namespaceBeforeSignOut) {
       _activeUserId = null;
       _activeNamespace = _storage?.namespaceForUser(null) ?? 'guest';
       _applySnapshot(_storage?.load(_activeNamespace) ?? AppSnapshot.empty());
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('账号及所有数据已彻底清除')));
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('注销失败: $e')));
     }
   }
+
+  Future<void> _deleteAccount() => _showDataPrivacyPage();
 
   // 🌟 新增功能：OTP 验证码找回密码对话框
   void _showForgotPasswordDialog() {
@@ -2682,7 +2629,7 @@ class _MainTabControllerState extends State<MainTabController>
               _buildCalendarPage(),
               _buildTrainingPage(),
               _buildPlanPage(),
-              _buildProfilePage(),
+              _buildProfileAccountCenter(),
             ],
           ),
 
@@ -3677,7 +3624,263 @@ class _MainTabControllerState extends State<MainTabController>
     );
   }
 
-  // --- 个人中心页 (完全恢复设计) ---
+  Widget _buildProfileAccountCenter() {
+    final identity = _profileIdentity();
+    return ProfilePage(
+      identity: identity,
+      basicData: ProfileBasicData(
+        gender: gender,
+        birthYear: birthYear,
+        birthMonth: birthMonth,
+        birthDay: birthDay,
+        heightCm: height,
+        currentWeightKg: currentWeight,
+      ),
+      summaryLoader: _loadProfileSummary,
+      onSaveBasic: _saveProfileBasic,
+      onSaveProfileValue: _saveProfileValue,
+      equipmentOptions:
+          exerciseCatalog.map((item) => item.equipment).toSet().toList()
+            ..sort(),
+      onOpenTrainingHistory: _openTrainingHistoryFromProfile,
+      onOpenWeeklyReview: _openWeeklyReviewFromProfile,
+      onOpenWeightHistory: _showWeightHistoryPage,
+      onManageTrainingPlans: _showTrainingTemplateManager,
+      onOpenAiProfile: _showAiProfilePage,
+      onOpenSuggestionHistory: _showSuggestionHistoryPage,
+      onOpenKnowledgeExplanation: _showAiKnowledgeExplanationPage,
+      onOpenAllRecords: _showRecordsHubPage,
+      onOpenDataPrivacy: _showDataPrivacyPage,
+      onOpenAbout: _showAboutGoatPage,
+      onOpenLicenses: _showLicenses,
+      onLogin: () async => _showLoginDialog(),
+      onLogout: _signOut,
+    );
+  }
+
+  ProfileIdentity _profileIdentity() {
+    final user = supabase.auth.currentUser;
+    final isLoggedIn = user != null && !user.isAnonymous;
+    return ProfileIdentity(
+      isLoggedIn: isLoggedIn,
+      displayName: isLoggedIn
+          ? (user.userMetadata?['display_name'] as String? ?? '')
+          : '',
+      email: isLoggedIn ? (user.email ?? '') : '',
+    );
+  }
+
+  Future<ProfileSummary> _loadProfileSummary() {
+    final storage = _storage;
+    final trainingRepository =
+        _localTrainingRepository() ??
+        InMemoryTrainingRepository(completedSessions: allTrainingSessions);
+    final aiState = storage == null
+        ? const AiCoachState()
+        : AiCoachLocalRepository(
+            preferences: storage.prefs,
+            namespace: _activeNamespace,
+          ).load();
+    final templateCount = _localTrainingTemplateStore()?.load().length ?? 0;
+    return const ProfileSummaryService().load(
+      identity: _profileIdentity(),
+      trainingRepository: trainingRepository,
+      weightRecords: _weightRecords(),
+      aiState: aiState,
+      trainingTemplateCount: templateCount,
+      anchorDate: DateTime.now(),
+    );
+  }
+
+  Future<void> _saveProfileBasic(ProfileBasicUpdate update) async {
+    final user = supabase.auth.currentUser;
+    if (user != null &&
+        !user.isAnonymous &&
+        update.displayName !=
+            (user.userMetadata?['display_name'] as String? ?? '')) {
+      await supabase.auth.updateUser(
+        UserAttributes(data: {'display_name': update.displayName}),
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      gender = update.gender;
+      birthYear = update.birthYear;
+      height = update.heightCm;
+    });
+    await _saveData();
+  }
+
+  Future<void> _saveProfileValue(
+    AiProfileCategory category,
+    String? value,
+  ) async {
+    final storage = _storage;
+    if (storage == null) throw StateError('本地数据尚未准备完成');
+    await AiCoachLocalRepository(
+      preferences: storage.prefs,
+      namespace: _activeNamespace,
+    ).setUserProfileValue(category: category, value: value);
+  }
+
+  Future<void> _openTrainingHistoryFromProfile() async {
+    _showTrainingHistorySheet();
+  }
+
+  Future<void> _openWeeklyReviewFromProfile() async {
+    _showWeeklyReviewPage();
+  }
+
+  Future<void> _showWeightHistoryPage() async {
+    final records = _weightRecords();
+    final trend = _weightTrendFor(DateTime.now());
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => WeightHistoryPage(
+          trend: trend,
+          records: records,
+          onAddWeight: () async => _showWeightPickerForDate(),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSuggestionHistoryPage() async {
+    final storage = _storage;
+    if (storage == null) return;
+    final repository = AiCoachLocalRepository(
+      preferences: storage.prefs,
+      namespace: _activeNamespace,
+    );
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SuggestionHistoryPage(stateLoader: repository.load),
+      ),
+    );
+  }
+
+  Future<void> _showAiKnowledgeExplanationPage() => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => const AiKnowledgeExplanationPage()),
+  );
+
+  Future<void> _showRecordsHubPage() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => RecordsHubPage(
+        onOpenWeight: _showWeightHistoryPage,
+        onOpenTraining: _openTrainingHistoryFromProfile,
+        onOpenWeeklyReview: _openWeeklyReviewFromProfile,
+        onOpenDiet: () async {
+          Navigator.of(context).pop();
+          if (mounted) setState(() => _currentIndex = 1);
+        },
+        onOpenWater: _showWaterTrackingPage,
+      ),
+    ),
+  );
+
+  Future<void> _showDataPrivacyPage() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => DataPrivacyPage(
+        isLoggedIn: _profileIdentity().isLoggedIn,
+        onExportCloud: _exportCloudUserData,
+        onExportLocal: _exportLocalUserData,
+        onOpenAiProfile: _showAiProfilePage,
+        onDeleteAccount: _deleteAccountWithConfirmation,
+      ),
+    ),
+  );
+
+  Future<String> _exportCloudUserData() {
+    return UserDataExportService(
+      isAuthenticated: () {
+        final user = supabase.auth.currentUser;
+        return user != null && !user.isAnonymous;
+      },
+      invokeExport: () async {
+        final response = await supabase.functions.invoke(
+          'export-user-data',
+          body: const {},
+        );
+        return response.data;
+      },
+      deliver: deliverJsonFile,
+    ).exportCloudData();
+  }
+
+  Future<String> _exportLocalUserData() async {
+    final storage = _storage;
+    if (storage == null) throw StateError('本地数据尚未准备完成');
+    final aiState = AiCoachLocalRepository(
+      preferences: storage.prefs,
+      namespace: _activeNamespace,
+    ).load();
+    final templates = _localTrainingTemplateStore()?.load() ?? const [];
+    final snapshot = storage.load(_activeNamespace) ?? _snapshotFromState();
+    return LocalUserDataExportService(deliver: deliverJsonFile).export({
+      'scope': _activeUserId == null ? 'local' : 'current-account',
+      'appSnapshot': snapshot.toJson(),
+      'trainingTemplates': templates.map((item) => item.toJson()).toList(),
+      'aiCoach': aiState.toJson(),
+    });
+  }
+
+  Future<void> _deleteAccountWithConfirmation(String confirmation) async {
+    final storage = _storage;
+    final userId = _activeUserId;
+    if (storage == null) throw StateError('本地数据尚未准备完成');
+    if (userId == null) throw StateError('需要先登录账号');
+    await supabase.auth.reauthenticate();
+    await AccountDeletionService(
+      userId: userId,
+      namespaceForUser: (id) => storage.namespaceForUser(id),
+      invokeRemoteDelete: (phrase) async {
+        await supabase.functions.invoke(
+          'delete-account',
+          body: {'confirmPhrase': phrase},
+        );
+      },
+      clearLocalNamespace: (namespace) async {
+        _activeUserId = null;
+        _activeNamespace = storage.namespaceForUser(null);
+        _applySnapshot(storage.load(_activeNamespace) ?? AppSnapshot.empty());
+        await storage.clearNamespace(namespace);
+        await AiCoachLocalRepository(
+          preferences: storage.prefs,
+          namespace: namespace,
+        ).clear();
+        await TrainingTemplateStore(
+          preferences: storage.prefs,
+          namespace: namespace,
+        ).clear();
+      },
+      signOut: () => supabase.auth.signOut(),
+    ).deleteCurrentAccount(confirmation: confirmation);
+    if (mounted) {
+      _rootMessengerKey.currentState?.showSnackBar(
+        const SnackBar(content: Text('账号及当前本地空间已删除')),
+      );
+    }
+  }
+
+  Future<void> _showAboutGoatPage() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => AboutGoatPage(
+        onOpenPrivacy: _showDataPrivacyPage,
+        onOpenLicenses: _showLicenses,
+      ),
+    ),
+  );
+
+  Future<void> _showLicenses() async {
+    showLicensePage(
+      context: context,
+      applicationName: 'GOAT',
+      applicationLegalese: '训练、饮食与身体趋势记录工具',
+    );
+  }
+
+  // --- 旧个人中心保留为不可达代码，待主文件后续模块化时移除。 ---
+  // ignore: unused_element
   Widget _buildProfilePage() {
     final user = supabase.auth.currentUser;
     final bool isLoggedIn = (user != null && !user.isAnonymous);

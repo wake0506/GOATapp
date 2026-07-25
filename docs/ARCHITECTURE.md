@@ -7,6 +7,7 @@
 - `lib/repositories/`: local-first write/read contracts for nutrition and training records.
 - `lib/features/voice_entry/`: the voice entry state machine, bottom sheet, editable text, parse preview, and confirm flow.
 - `lib/features/nutrition/`: text-first fast diet entry, recent-food access, repeat/copy preview, and record editing.
+- `lib/features/profile/`: personal fitness control center, profile summary aggregation, Stage 3 training preferences, suggestion history, export, account deletion, and app/about surfaces.
 - `lib/models/sync_operation.dart` and `lib/models/sync_cursor.dart`: durable local sync protocol values.
 - `lib/services/sync_queue_service.dart`: namespace-scoped queue and retry policy.
 - `lib/core/`: shared theme, errors, and date utilities as they are extracted.

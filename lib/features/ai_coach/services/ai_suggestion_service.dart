@@ -16,9 +16,12 @@ class AiSuggestionTransitionService {
         AiSuggestionStatus.rejected,
         AiSuggestionStatus.dismissed,
       },
-      AiSuggestionStatus.accepted ||
-      AiSuggestionStatus.modified ||
-      AiSuggestionStatus.applyFailed => const {
+      AiSuggestionStatus.modified => const {
+        AiSuggestionStatus.accepted,
+        AiSuggestionStatus.rejected,
+        AiSuggestionStatus.dismissed,
+      },
+      AiSuggestionStatus.accepted || AiSuggestionStatus.applyFailed => const {
         AiSuggestionStatus.applied,
         AiSuggestionStatus.applyFailed,
         AiSuggestionStatus.rejected,
@@ -44,6 +47,8 @@ class AiSuggestionTransitionService {
 
 typedef AiActionValidator = Future<bool> Function(AiProposedAction action);
 typedef AiActionPersister = Future<void> Function(AiProposedAction action);
+typedef AiSuggestionTransitionRecorder =
+    Future<void> Function(AiSuggestion suggestion);
 
 class AiSuggestionApplicationService {
   const AiSuggestionApplicationService({
@@ -58,6 +63,7 @@ class AiSuggestionApplicationService {
     required AiActionValidator validate,
     required AiActionPersister persist,
     AiProposedAction? modifiedAction,
+    AiSuggestionTransitionRecorder? onTransition,
   }) async {
     if (!userConfirmed) return suggestion;
     final action = modifiedAction ?? suggestion.proposedAction;
@@ -71,23 +77,41 @@ class AiSuggestionApplicationService {
             modifiedAction: modifiedAction,
           )
         : suggestion;
+    if (accepted != suggestion) await onTransition?.call(accepted);
+    if (accepted.status == AiSuggestionStatus.modified) {
+      accepted = transitions.transition(
+        accepted,
+        AiSuggestionStatus.accepted,
+        modifiedAction: modifiedAction,
+      );
+      await onTransition?.call(accepted);
+    }
     if (action == null) return accepted;
     try {
       if (!await validate(action)) {
-        return transitions.transition(
+        final failed = transitions.transition(
           accepted,
           AiSuggestionStatus.applyFailed,
           failureMessage: '建议不再符合当前数据，请重新检查。',
         );
+        await onTransition?.call(failed);
+        return failed;
       }
       await persist(action);
-      return transitions.transition(accepted, AiSuggestionStatus.applied);
+      final applied = transitions.transition(
+        accepted,
+        AiSuggestionStatus.applied,
+      );
+      await onTransition?.call(applied);
+      return applied;
     } catch (_) {
-      return transitions.transition(
+      final failed = transitions.transition(
         accepted,
         AiSuggestionStatus.applyFailed,
         failureMessage: '保存失败，原数据未改变。',
       );
+      await onTransition?.call(failed);
+      return failed;
     }
   }
 }

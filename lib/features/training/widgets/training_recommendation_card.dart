@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/progression_target.dart';
+import '../../ai_coach/models/ai_memory.dart';
+import '../../ai_coach/services/ai_coach_scenario_service.dart';
+import '../../ai_coach/widgets/ai_coach_explanation_card.dart';
 import '../../analytics/models/progression_recommendation.dart';
 
 class TrainingRecommendationCard extends StatelessWidget {
@@ -10,12 +13,16 @@ class TrainingRecommendationCard extends StatelessWidget {
     required this.recommendation,
     this.referenceWeightKg,
     this.onApply,
+    this.coachMemories = const [],
+    this.exerciseName = '当前动作',
   });
 
   final ProgressionTarget? target;
   final ProgressionRecommendation? recommendation;
   final double? referenceWeightKg;
   final VoidCallback? onApply;
+  final List<AiMemoryItem> coachMemories;
+  final String exerciseName;
 
   @override
   Widget build(BuildContext context) {
@@ -145,45 +152,61 @@ class TrainingRecommendationCard extends StatelessWidget {
   Future<void> _showReasons(
     BuildContext context,
     ProgressionRecommendation result,
-  ) => showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: Colors.white,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-    ),
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-        child: Column(
-          key: const Key('training-recommendation-reason-sheet'),
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '建议依据',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            for (final reason in result.reasons)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  '• ${_reasonLabel(reason)}',
-                  style: const TextStyle(fontSize: 14, height: 1.35),
-                ),
+  ) {
+    final explanation = const AiCoachScenarioService().progression(
+      recommendation: result,
+      exerciseName: exerciseName,
+      memories: coachMemories,
+      target: target,
+      referenceWeightKg: referenceWeightKg,
+    );
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+          child: Column(
+            key: const Key('training-recommendation-reason-sheet'),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '建议依据',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
               ),
-            const SizedBox(height: 6),
-            Text(
-              result.basedOnSessionDate == null
-                  ? '依据：当前可用的同动作历史'
-                  : '依据：${_dateLabel(result.basedOnSessionDate!)} 的同动作训练',
-              style: const TextStyle(color: Color(0xFF7D8583), fontSize: 12),
-            ),
-          ],
+              const SizedBox(height: 12),
+              for (final reason in result.reasons)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '• ${_reasonLabel(reason)}',
+                    style: const TextStyle(fontSize: 14, height: 1.35),
+                  ),
+                ),
+              const SizedBox(height: 6),
+              Text(
+                result.basedOnSessionDate == null
+                    ? '依据：当前可用的同动作历史'
+                    : '依据：${_dateLabel(result.basedOnSessionDate!)} 的同动作训练',
+                style: const TextStyle(color: Color(0xFF7D8583), fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              AiCoachExplanationCard(
+                key: const Key('progression-ai-explanation'),
+                explanation: explanation,
+                compact: true,
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   String _reasonLabel(ProgressionReason reason) => switch (reason) {
     ProgressionReason.allTargetRepsCompleted => '主要工作组均达到目标次数上限',

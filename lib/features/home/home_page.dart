@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../models/daily_macro_stats.dart';
 import '../../models/consumed_record.dart';
 import '../analytics/models/weight_trend.dart';
+import '../ai_coach/models/ai_scenario_explanation.dart';
 import '../../widgets/goat_page_header.dart';
 import 'models/home_dashboard_view_model.dart';
 import 'widgets/home_ai_card.dart';
@@ -40,6 +41,7 @@ class HomePage extends StatelessWidget {
     required this.onOpenTraining,
     required this.onAddExercise,
     this.weightTrend,
+    this.coachExplanation,
   });
 
   final String businessDate;
@@ -68,6 +70,7 @@ class HomePage extends StatelessWidget {
   final VoidCallback onOpenTraining;
   final VoidCallback onAddExercise;
   final WeightTrend? weightTrend;
+  final AiCoachScenarioExplanation? coachExplanation;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +120,7 @@ class HomePage extends StatelessWidget {
                         isLoading: isAiLoading,
                         onRefresh: onRequestAiAdvice,
                         onClose: onDismissAi,
+                        explanation: coachExplanation,
                       ),
                       const SizedBox(height: 12),
                     ],

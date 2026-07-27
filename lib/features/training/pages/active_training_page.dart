@@ -9,6 +9,7 @@ import '../../../repositories/training_repository.dart';
 import '../../analytics/models/analytics_date_range.dart';
 import '../../analytics/models/progression_recommendation.dart';
 import '../../analytics/services/progression_recommendation_engine.dart';
+import '../../ai_coach/models/ai_memory.dart';
 import '../domain/active_training_session.dart';
 import '../domain/training_session_state.dart';
 import '../models/exercise_recommendation.dart';
@@ -41,6 +42,7 @@ class ActiveTrainingPage extends StatefulWidget {
     required this.onFinished,
     this.completedSessions = const [],
     this.clock,
+    this.coachMemories = const [],
   });
 
   final ActiveTrainingSession initialSession;
@@ -51,6 +53,7 @@ class ActiveTrainingPage extends StatefulWidget {
   final Future<void> Function(TrainingSession) onFinished;
   final List<TrainingSession> completedSessions;
   final DateTime Function()? clock;
+  final List<AiMemoryItem> coachMemories;
 
   @override
   State<ActiveTrainingPage> createState() => _ActiveTrainingPageState();
@@ -498,6 +501,7 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           ),
           catalog: widget.catalog,
           activeSession: _session.draft,
+          coachMemories: widget.coachMemories,
           onApplyRecommendation: _applyRecommendedExercise,
         ),
       ),
@@ -1010,6 +1014,10 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
           onChangeExerciseRest: _changeRestDuration,
           onRestoreRecommended: _restoreRecommendedRest,
           recommendation: rest.recommendation,
+          coachMemories: widget.coachMemories,
+          setType: _set?.resolvedSetType.name,
+          rir: _set?.rir,
+          reachedFailure: _set?.reachedFailure == true,
         ),
         if (nextRecommendation != null) ...[
           const SizedBox(height: 14),
@@ -1428,6 +1436,8 @@ class _ActiveTrainingPageState extends State<ActiveTrainingPage>
                     target: exercise.progressionTarget,
                     recommendation: _recommendation,
                     referenceWeightKg: _lastPerformance?.set.weight,
+                    exerciseName: exercise.exerciseName,
+                    coachMemories: widget.coachMemories,
                     onApply: _recommendation?.suggestedWeightKg == null
                         ? null
                         : _applyRecommendation,

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/rest_prescription.dart';
+import '../../ai_coach/models/ai_memory.dart';
+import '../../ai_coach/services/ai_coach_scenario_service.dart';
+import '../../ai_coach/widgets/ai_evidence_sheet.dart';
+import '../../ai_coach/widgets/ai_follow_up_sheet.dart';
 
 class RestTimerCard extends StatelessWidget {
   const RestTimerCard({
@@ -15,6 +19,10 @@ class RestTimerCard extends StatelessWidget {
     required this.onChangeExerciseRest,
     required this.onRestoreRecommended,
     this.recommendation,
+    this.coachMemories = const [],
+    this.setType,
+    this.rir,
+    this.reachedFailure = false,
   });
 
   final int remainingSeconds;
@@ -27,6 +35,10 @@ class RestTimerCard extends StatelessWidget {
   final VoidCallback onChangeExerciseRest;
   final VoidCallback onRestoreRecommended;
   final RestRecommendation? recommendation;
+  final List<AiMemoryItem> coachMemories;
+  final String? setType;
+  final int? rir;
+  final bool reachedFailure;
 
   String _formatSeconds(int seconds) {
     final minutes = seconds ~/ 60;
@@ -154,6 +166,57 @@ class RestTimerCard extends StatelessWidget {
                         fontSize: 12,
                       ),
                     ),
+                    if (recommendation != null) ...[
+                      const SizedBox(height: 3),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 4,
+                        children: [
+                          TextButton(
+                            key: const Key('rest-detailed-explanation'),
+                            onPressed: () {
+                              final explanation = const AiCoachScenarioService()
+                                  .rest(
+                                    recommendation: recommendation!,
+                                    exerciseName: exerciseName,
+                                    memories: coachMemories,
+                                    setType: setType,
+                                    rir: rir,
+                                    reachedFailure: reachedFailure,
+                                  );
+                              AiEvidenceSheet.show(context, explanation);
+                            },
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              minimumSize: const Size(0, 28),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Text('详细解释 ›'),
+                          ),
+                          TextButton(
+                            key: const Key('rest-follow-up'),
+                            onPressed: () {
+                              final explanation = const AiCoachScenarioService()
+                                  .rest(
+                                    recommendation: recommendation!,
+                                    exerciseName: exerciseName,
+                                    memories: coachMemories,
+                                    setType: setType,
+                                    rir: rir,
+                                    reachedFailure: reachedFailure,
+                                  );
+                              AiFollowUpSheet.show(context, explanation);
+                            },
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              minimumSize: const Size(0, 28),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Text('问 GOAT'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

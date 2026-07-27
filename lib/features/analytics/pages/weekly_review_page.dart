@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../widgets/goat_page_header.dart';
+import '../../ai_coach/models/ai_memory.dart';
+import '../../ai_coach/models/ai_suggestion.dart';
+import '../../ai_coach/services/ai_coach_scenario_service.dart';
+import '../../ai_coach/widgets/ai_coach_explanation_card.dart';
 import '../../training/models/exercise_metadata.dart';
 import '../../training/models/training_coverage.dart';
 import '../models/effective_set_summary.dart';
@@ -14,45 +18,71 @@ class WeeklyReviewPage extends StatelessWidget {
     required this.nutrition,
     this.coverage,
     this.onOpenCoverage,
+    this.coachMemories = const [],
+    this.trainingGoal,
+    this.coachSuggestions = const [],
+    this.onOpenSuggestion,
   });
 
   final WeeklyTrainingReview training;
   final WeeklyNutritionReview nutrition;
   final TrainingCoverageResult? coverage;
   final VoidCallback? onOpenCoverage;
+  final List<AiMemoryItem> coachMemories;
+  final String? trainingGoal;
+  final List<AiSuggestion> coachSuggestions;
+  final ValueChanged<AiSuggestion>? onOpenSuggestion;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    key: const Key('weekly-review-page'),
-    backgroundColor: const Color(0xFFF4F5F7),
-    appBar: AppBar(
+  Widget build(BuildContext context) {
+    final coach = const AiCoachScenarioService().weekly(
+      training: training,
+      nutrition: nutrition,
+      coverage: coverage,
+      memories: coachMemories,
+      trainingGoal: trainingGoal,
+      suggestions: coachSuggestions,
+    );
+    return Scaffold(
+      key: const Key('weekly-review-page'),
       backgroundColor: const Color(0xFFF4F5F7),
-      elevation: 0,
-      title: const GoatPageHeader(title: '本 周 复 盘'),
-    ),
-    body: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-      children: [
-        Text(
-          '${_date(training.dateRange.start)} – ${_date(training.dateRange.end)}',
-          style: const TextStyle(color: Color(0xFF7D8583), fontSize: 12),
-        ),
-        const SizedBox(height: 12),
-        _TrainingReviewCard(review: training),
-        if (coverage != null) ...[
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF4F5F7),
+        elevation: 0,
+        title: const GoatPageHeader(title: '本 周 复 盘'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+        children: [
+          Text(
+            '${_date(training.dateRange.start)} – ${_date(training.dateRange.end)}',
+            style: const TextStyle(color: Color(0xFF7D8583), fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          _TrainingReviewCard(review: training),
+          if (coverage != null) ...[
+            const SizedBox(height: 14),
+            _WeeklyCoverageCard(
+              coverage: coverage!,
+              onOpenCoverage: onOpenCoverage,
+            ),
+          ],
           const SizedBox(height: 14),
-          _WeeklyCoverageCard(
-            coverage: coverage!,
-            onOpenCoverage: onOpenCoverage,
+          _NutritionReviewCard(review: nutrition),
+          const SizedBox(height: 14),
+          _WeightReviewCard(review: nutrition),
+          const SizedBox(height: 14),
+          AiCoachExplanationCard(
+            key: const Key('weekly-coach-review'),
+            explanation: coach,
+            onSuggestion: onOpenSuggestion == null
+                ? null
+                : (index) => onOpenSuggestion!(coach.suggestions[index]),
           ),
         ],
-        const SizedBox(height: 14),
-        _NutritionReviewCard(review: nutrition),
-        const SizedBox(height: 14),
-        _WeightReviewCard(review: nutrition),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   static String _date(DateTime date) => '${date.month}/${date.day}';
 }

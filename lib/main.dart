@@ -33,11 +33,14 @@ import 'features/training/exercise_time.dart';
 import 'features/training/training_page.dart';
 import 'features/training/domain/active_training_session.dart';
 import 'features/training/models/exercise_recommendation.dart';
+import 'features/training/models/exercise_rest_profile_catalog.dart';
+import 'features/training/models/training_template.dart';
 import 'features/training/pages/active_training_page.dart';
 import 'features/training/pages/training_coverage_page.dart';
 import 'features/training/services/training_coverage_calculator.dart';
 import 'features/training/services/training_draft_factory.dart';
 import 'features/training/services/training_session_engine.dart';
+import 'features/training/services/rest_prescription_engine.dart';
 import 'features/training/services/training_template_store.dart';
 import 'features/training/widgets/training_setup_sheet.dart';
 import 'features/training/widgets/training_template_manager_sheet.dart';
@@ -55,6 +58,11 @@ import 'features/ai_coach/pages/ai_profile_page.dart';
 import 'features/ai_coach/repositories/ai_coach_local_repository.dart';
 import 'features/ai_coach/models/ai_coach_state.dart';
 import 'features/ai_coach/models/ai_memory.dart';
+import 'features/ai_coach/models/ai_suggestion.dart';
+import 'features/ai_coach/services/ai_coach_scenario_service.dart';
+import 'features/ai_coach/services/ai_suggestion_service.dart';
+import 'features/ai_coach/services/training_ai_action_service.dart';
+import 'features/ai_coach/widgets/ai_suggestion_action_sheet.dart';
 import 'features/profile/models/profile_summary.dart';
 import 'features/profile/pages/account_center_pages.dart';
 import 'features/profile/pages/profile_page.dart';
@@ -882,7 +890,21 @@ class _MainTabControllerState extends State<MainTabController>
         anchorDate: anchorDate,
       );
 
-  void _showWeeklyReviewPage() {
+  List<AiMemoryItem> _activeAiMemories() {
+    final storage = _storage;
+    if (storage == null) return const [];
+    return AiCoachLocalRepository(
+      preferences: storage.prefs,
+      namespace: _activeNamespace,
+    ).load().memories.where((item) => item.isUsableInContext).toList();
+  }
+
+  String? _profileMemory(AiProfileCategory category) => _activeAiMemories()
+      .where((item) => item.category == category)
+      .map((item) => item.value)
+      .firstOrNull;
+
+  Future<void> _showWeeklyReviewPage() async {
     final anchor = DateUtils.dateOnly(
       DateTime.tryParse(viewDateStr) ?? DateTime.now(),
     );
@@ -903,6 +925,27 @@ class _MainTabControllerState extends State<MainTabController>
         end: anchor,
       ),
     );
+    final template = _localTrainingTemplateStore()?.load().firstOrNull;
+    final generatedWeeklySuggestion = template == null
+        ? null
+        : _buildWeeklyRestSuggestion(template, anchor);
+    final aiRepository = _aiCoachRepository();
+    final existingWeeklySuggestion =
+        generatedWeeklySuggestion == null || aiRepository == null
+        ? null
+        : aiRepository
+              .load()
+              .suggestions
+              .where((item) => item.id == generatedWeeklySuggestion.id)
+              .firstOrNull;
+    final weeklySuggestion =
+        existingWeeklySuggestion ?? generatedWeeklySuggestion;
+    if (generatedWeeklySuggestion != null &&
+        existingWeeklySuggestion == null &&
+        aiRepository != null) {
+      await aiRepository.saveSuggestion(generatedWeeklySuggestion);
+    }
+    if (!mounted) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => WeeklyReviewPage(
@@ -910,6 +953,152 @@ class _MainTabControllerState extends State<MainTabController>
           nutrition: nutrition,
           coverage: coverage,
           onOpenCoverage: _showTrainingCoveragePage,
+          coachMemories: _activeAiMemories(),
+          trainingGoal: _profileMemory(AiProfileCategory.trainingGoal),
+          coachSuggestions: [
+            if (weeklySuggestion != null &&
+                (weeklySuggestion.status == AiSuggestionStatus.proposed ||
+                    weeklySuggestion.status == AiSuggestionStatus.applyFailed))
+              weeklySuggestion,
+          ],
+          onOpenSuggestion: weeklySuggestion == null || template == null
+              ? null
+              : (suggestion) => unawaited(
+                  _handleWeeklySuggestion(
+                    suggestion,
+                    template,
+                    exerciseName: _exerciseNameById(
+                      suggestion.proposedAction?.payload['exerciseId']
+                              as String? ??
+                          '',
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+
+  AiCoachLocalRepository? _aiCoachRepository() {
+    final storage = _storage;
+    if (storage == null) return null;
+    return AiCoachLocalRepository(
+      preferences: storage.prefs,
+      namespace: _activeNamespace,
+    );
+  }
+
+  AiSuggestion? _buildWeeklyRestSuggestion(
+    TrainingTemplate template,
+    DateTime anchor,
+  ) {
+    final exerciseId = template.exerciseIds.firstOrNull;
+    if (exerciseId == null ||
+        template.restFor(exerciseId).mode == RestPrescriptionMode.fixed) {
+      return null;
+    }
+    final recommendation = const RestPrescriptionEngine().recommend(
+      RestPrescriptionRequest(
+        currentProfile: ExerciseRestProfileCatalog.find(exerciseId),
+      ),
+    );
+    return const AiCoachScenarioService().restSuggestion(
+      id: 'weekly-rest-${anchor.year}-${anchor.month}-${anchor.day}-${template.id}-$exerciseId',
+      templateId: template.id,
+      exerciseId: exerciseId,
+      exerciseName: _exerciseNameById(exerciseId),
+      fixedSeconds: recommendation.recommendedSeconds,
+      createdAt: anchor,
+    );
+  }
+
+  String _exerciseNameById(String exerciseId) =>
+      exerciseCatalog
+          .where((item) => item.id == exerciseId)
+          .map((item) => item.name)
+          .firstOrNull ??
+      exerciseId;
+
+  Future<void> _handleWeeklySuggestion(
+    AiSuggestion suggestion,
+    TrainingTemplate template, {
+    required String exerciseName,
+  }) async {
+    final repository = _aiCoachRepository();
+    final templateStore = _localTrainingTemplateStore();
+    final action = suggestion.proposedAction;
+    if (repository == null || templateStore == null || action == null) return;
+    final seconds = (action.payload['fixedSeconds'] as num?)?.toInt();
+    if (seconds == null) return;
+    final decision = await AiSuggestionActionSheet.show(
+      context,
+      suggestion: suggestion,
+      currentLabel: 'GOAT 推荐（随组状态动态计算）',
+      updatedLabel:
+          '固定 ${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}',
+      impactLabel: '训练方案“${template.name}”中的 $exerciseName；当前训练快照不变',
+    );
+    if (decision == null || !mounted) return;
+    if (!decision.confirmed) {
+      final feedbackType =
+          decision.feedbackType ?? SuggestionFeedbackType.dismissed;
+      final rejected = feedbackType != SuggestionFeedbackType.dismissed;
+      final dismissed = const AiSuggestionTransitionService().transition(
+        suggestion,
+        rejected ? AiSuggestionStatus.rejected : AiSuggestionStatus.dismissed,
+      );
+      await repository.saveSuggestion(dismissed);
+      await repository.recordFeedback(
+        SuggestionFeedback(
+          suggestionId: suggestion.id,
+          decision: rejected
+              ? SuggestionDecision.rejected
+              : SuggestionDecision.dismissed,
+          reasonCode: switch (feedbackType) {
+            SuggestionFeedbackType.notForMe =>
+              SuggestionRejectionReason.notSuitable,
+            SuggestionFeedbackType.inaccurateData =>
+              SuggestionRejectionReason.inaccurateData,
+            SuggestionFeedbackType.disliked =>
+              SuggestionRejectionReason.dislikeSuggestion,
+            _ => null,
+          },
+          feedbackType: feedbackType,
+          createdAt: DateTime.now(),
+        ),
+      );
+      return;
+    }
+    final actionService = TrainingAiActionService(templateStore: templateStore);
+    final result = await const AiSuggestionApplicationService().apply(
+      suggestion: suggestion,
+      userConfirmed: true,
+      modifiedAction: decision.modifiedAction,
+      validate: actionService.validate,
+      persist: actionService.apply,
+      onTransition: repository.saveSuggestion,
+    );
+    await repository.saveSuggestion(result);
+    await repository.recordFeedback(
+      SuggestionFeedback(
+        suggestionId: suggestion.id,
+        decision: decision.modifiedAction == null
+            ? SuggestionDecision.accepted
+            : SuggestionDecision.modified,
+        modifiedAction: decision.modifiedAction,
+        feedbackType: result.status == AiSuggestionStatus.applied
+            ? SuggestionFeedbackType.helpful
+            : SuggestionFeedbackType.inaccurateData,
+        createdAt: DateTime.now(),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.status == AiSuggestionStatus.applied
+              ? '建议已应用；当前训练快照保持不变'
+              : result.failureMessage ?? '建议应用失败，原数据未改变',
         ),
       ),
     );
@@ -967,6 +1156,7 @@ class _MainTabControllerState extends State<MainTabController>
           weeklyCoverage: weeklyCoverage,
           catalog: exerciseCatalog,
           activeSession: active?.draft,
+          coachMemories: _activeAiMemories(),
           onApplyRecommendation: active == null
               ? null
               : _adoptCoverageRecommendation,
@@ -1111,6 +1301,7 @@ class _MainTabControllerState extends State<MainTabController>
           repository: repository,
           catalog: exerciseCatalog,
           completedSessions: allTrainingSessions,
+          coachMemories: _activeAiMemories(),
           onSessionChanged: (session) {
             if (mounted) setState(() => _activeTrainingSession = session);
           },
@@ -2739,6 +2930,20 @@ class _MainTabControllerState extends State<MainTabController>
     );
     final previousWeight =
         dailyWeight[_dateKey(currentDate.subtract(const Duration(days: 1)))];
+    final weeklyNutrition = const WeeklyNutritionReviewCalculator().calculate(
+      records: allConsumedItems,
+      weightRecords: _weightRecords(),
+      anchorDate: currentDate,
+    );
+    final nutritionCoach = const AiCoachScenarioService().nutrition(
+      review: weeklyNutrition,
+      calorieTarget: targetKcal,
+      memories: _activeAiMemories(),
+      trainingGoal: _profileMemory(AiProfileCategory.trainingGoal),
+      nutritionPreference: _profileMemory(
+        AiProfileCategory.nutritionPreference,
+      ),
+    );
     return HomePage(
       businessDate: viewDateStr,
       isToday: isToday,
@@ -2752,6 +2957,7 @@ class _MainTabControllerState extends State<MainTabController>
       previousWeight: previousWeight,
       weightTrend: _weightTrendFor(currentDate),
       consumed: consumed,
+      coachExplanation: nutritionCoach,
       aiContent: _currentAiTip,
       isAiLoading: _isAiTipLoading,
       showAiCard: aiDismissedDate != viewDateStr,

@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 import '../../../exercise_catalog.dart';
 import '../../../models/training.dart';
 import '../../../widgets/goat_page_header.dart';
+import '../../ai_coach/models/ai_memory.dart';
+import '../../ai_coach/services/ai_coach_scenario_service.dart';
+import '../../ai_coach/widgets/ai_coach_explanation_card.dart';
+import '../../ai_coach/widgets/ai_follow_up_sheet.dart';
 import '../models/exercise_metadata.dart';
 import '../models/exercise_recommendation.dart';
 import '../models/muscle_region_svg_mapping.dart';
@@ -49,6 +53,7 @@ class TrainingCoveragePage extends StatefulWidget {
     this.onApplyRecommendation,
     this.initializeSvg = initializeSvgMuscleMap,
     this.initialRegion,
+    this.coachMemories = const [],
   });
 
   final TrainingCoverageResult? currentCoverage;
@@ -60,6 +65,7 @@ class TrainingCoveragePage extends StatefulWidget {
   onApplyRecommendation;
   final MuscleMapSvgInitializer initializeSvg;
   final MuscleRegion? initialRegion;
+  final List<AiMemoryItem> coachMemories;
 
   @override
   State<TrainingCoveragePage> createState() => _TrainingCoveragePageState();
@@ -84,6 +90,20 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
     TrainingCoverageScope.today => widget.todayCoverage,
     TrainingCoverageScope.sevenDays => widget.weeklyCoverage,
   };
+
+  Set<String>? get _availableEquipment {
+    final values = widget.coachMemories
+        .where(
+          (item) =>
+              item.isUsableInContext &&
+              item.category == AiProfileCategory.availableEquipment,
+        )
+        .expand((item) => item.value.split('、'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet();
+    return values.isEmpty ? null : values;
+  }
 
   @override
   void initState() {
@@ -141,6 +161,7 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
           currentSession: activeSession,
           coverageResult: currentCoverage,
           catalog: widget.catalog,
+          availableEquipment: _availableEquipment,
         )
         .take(5)
         .toList(growable: false);
@@ -187,6 +208,15 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
     final recommendation = _recommendations
         .where((item) => item.targetRegions.contains(region))
         .firstOrNull;
+    final explanation = const AiCoachScenarioService().coverage(
+      coverage: _coverage,
+      candidates: [
+        ?recommendation,
+        ..._recommendations.where((item) => item != recommendation),
+      ],
+      memories: widget.coachMemories,
+      selectedRegion: region,
+    );
     final apply = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -298,6 +328,17 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
                   ),
                 ],
               ],
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const Key('coverage-region-ask-goat'),
+                  onPressed: () =>
+                      AiFollowUpSheet.show(sheetContext, explanation),
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+                  label: const Text('问 GOAT'),
+                ),
+              ),
               const SizedBox(height: 12),
               const Text(
                 '颜色仅表示当前时间窗口内的训练覆盖，不代表损伤、恢复或肌肉增长。',
@@ -323,12 +364,13 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
     }
     final apply = await showModalBottomSheet<bool>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
           child: Column(
             key: const Key('coverage-recommendation-detail'),
@@ -355,6 +397,22 @@ class _TrainingCoveragePageState extends State<TrainingCoveragePage> {
                     .map(exerciseRecommendationReasonLabel)
                     .join(' · '),
                 style: const TextStyle(color: Color(0xFF68716F)),
+              ),
+              const SizedBox(height: 14),
+              AiCoachExplanationCard(
+                key: const Key('coverage-ai-explanation'),
+                explanation: const AiCoachScenarioService().coverage(
+                  coverage: _coverage,
+                  candidates: [
+                    recommendation,
+                    ..._recommendations.where(
+                      (item) => item.exercise.id != recommendation.exercise.id,
+                    ),
+                  ],
+                  memories: widget.coachMemories,
+                  selectedRegion: recommendation.targetRegions.firstOrNull,
+                ),
+                compact: true,
               ),
               if (widget.onApplyRecommendation != null) ...[
                 const SizedBox(height: 20),

@@ -41,6 +41,14 @@ enum SuggestionRejectionReason {
   other,
 }
 
+enum SuggestionFeedbackType {
+  helpful,
+  notForMe,
+  inaccurateData,
+  disliked,
+  dismissed,
+}
+
 class AiProposedAction {
   const AiProposedAction({
     required this.type,
@@ -178,12 +186,14 @@ class SuggestionFeedback {
     required this.createdAt,
     this.modifiedAction,
     this.reasonCode,
+    this.feedbackType,
   });
 
   final String suggestionId;
   final SuggestionDecision decision;
   final AiProposedAction? modifiedAction;
   final SuggestionRejectionReason? reasonCode;
+  final SuggestionFeedbackType? feedbackType;
   final DateTime createdAt;
 
   Map<String, dynamic> toJson() => {
@@ -191,6 +201,7 @@ class SuggestionFeedback {
     'decision': decision.name,
     'modifiedAction': modifiedAction?.toJson(),
     'reasonCode': reasonCode?.name,
+    'feedbackType': feedbackType?.name,
     'createdAt': createdAt.toUtc().toIso8601String(),
   };
 
@@ -209,6 +220,9 @@ class SuggestionFeedback {
             : null,
         reasonCode: SuggestionRejectionReason.values
             .where((item) => item.name == json['reasonCode'])
+            .firstOrNull,
+        feedbackType: SuggestionFeedbackType.values
+            .where((item) => item.name == json['feedbackType'])
             .firstOrNull,
         createdAt:
             DateTime.tryParse(stringValue(json['createdAt'])) ?? DateTime.now(),

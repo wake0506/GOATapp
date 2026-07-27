@@ -33,3 +33,11 @@ exercise selection, rest, warm-up, plate, trend-weight, or effective-set
 results. A proposed action can reach a domain service only after explicit user
 confirmation and is marked `applied` only after validation and persistence
 succeed.
+
+Stage 3B integrates that boundary into Home nutrition, active-training
+progression, rest explanations, coverage recommendations, and weekly review.
+Shared evidence and preset follow-up surfaces receive only task-minimized
+context and validator-approved references. Suggestion actions use preview,
+explicit confirmation, domain validation, persistence, state-history recording,
+and feedback; current active-training snapshots stay immutable when a template
+is updated. See `docs/AI_COACH_STAGE3B.md`.

@@ -5,6 +5,7 @@ import 'ai_suggestion.dart';
 
 enum AiCoachUncertainty {
   insufficientEvidence,
+  partialData,
   missingUserContext,
   needsConfirmation,
 }

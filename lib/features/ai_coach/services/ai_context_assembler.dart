@@ -36,7 +36,11 @@ class AiContextAssembler {
 
   AssembledAiContext assemble(AiContextRequest request) {
     final usableMemories = request.memories
-        .where((item) => item.isUsableInContext)
+        .where(
+          (item) =>
+              item.isUsableInContext &&
+              _memoryCategories(request.taskType).contains(item.category),
+        )
         .map(
           (item) => {
             'id': item.id,
@@ -70,6 +74,7 @@ class AiContextAssembler {
           'returnStructuredJson': true,
           'allowedUncertainties': [
             'insufficientEvidence',
+            'partialData',
             'missingUserContext',
             'needsConfirmation',
           ],
@@ -158,6 +163,8 @@ class AiContextAssembler {
         'currentMeal',
         'targets',
         'weightTrend',
+        'trainingGoal',
+        'nutritionPreference',
       },
       AiCoachTaskType.weightTrend => const {'weightTrend'},
       AiCoachTaskType.trainingSummary => const {
@@ -172,4 +179,48 @@ class AiContextAssembler {
         if (allowed.contains(entry.key)) entry.key: entry.value,
     };
   }
+
+  Set<AiProfileCategory> _memoryCategories(AiCoachTaskType task) =>
+      switch (task) {
+        AiCoachTaskType.nutrition => const {
+          AiProfileCategory.trainingGoal,
+          AiProfileCategory.nutritionPreference,
+          AiProfileCategory.coachingStyle,
+          AiProfileCategory.constraint,
+        },
+        AiCoachTaskType.progressionExplanation => const {
+          AiProfileCategory.trainingGoal,
+          AiProfileCategory.trainingExperience,
+          AiProfileCategory.trainingPreference,
+          AiProfileCategory.coachingStyle,
+          AiProfileCategory.constraint,
+        },
+        AiCoachTaskType.restExplanation => const {
+          AiProfileCategory.trainingPreference,
+          AiProfileCategory.trainingHabit,
+          AiProfileCategory.coachingStyle,
+          AiProfileCategory.constraint,
+        },
+        AiCoachTaskType.coverageExplanation ||
+        AiCoachTaskType.exerciseSelection => const {
+          AiProfileCategory.trainingGoal,
+          AiProfileCategory.availableEquipment,
+          AiProfileCategory.trainingPreference,
+          AiProfileCategory.dislikedExercise,
+          AiProfileCategory.coachingStyle,
+          AiProfileCategory.constraint,
+        },
+        AiCoachTaskType.trainingSummary => const {
+          AiProfileCategory.trainingGoal,
+          AiProfileCategory.trainingPreference,
+          AiProfileCategory.nutritionPreference,
+          AiProfileCategory.coachingStyle,
+          AiProfileCategory.constraint,
+        },
+        AiCoachTaskType.weightTrend => const {
+          AiProfileCategory.trainingGoal,
+          AiProfileCategory.coachingStyle,
+        },
+        AiCoachTaskType.profile => AiProfileCategory.values.toSet(),
+      };
 }

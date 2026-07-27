@@ -1,0 +1,12 @@
+Output format is unaligned.
+table_count=17
+policy_count=65
+function_count=8
+trigger_count=18
+flag_count=4
+versioned_sync=false
+training_templates_count=0
+ai_memories_count=0
+ai_suggestions_count=0
+ai_suggestion_feedback_count=0
+schema_checksum=1878d0eb56dda8caea21430bb086ff2c

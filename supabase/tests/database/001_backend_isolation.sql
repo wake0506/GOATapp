@@ -1,5 +1,8 @@
 begin;
 
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions, auth, pg_catalog;
+
 select plan(10);
 
 -- These deterministic users exist only inside the local test transaction.
@@ -64,9 +67,10 @@ select throws_ok(
 
 set local role anon;
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
-select is(
-  (select count(*) from public.diet_logs)::integer,
-  0,
+select throws_ok(
+  $$select count(*) from public.diet_logs$$,
+  '42501',
+  null,
   'anonymous request cannot access personal data'
 );
 

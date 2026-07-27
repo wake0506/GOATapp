@@ -1,15 +1,16 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEXT_LENGTH = 8_000;
 const TIMEOUT_MS = 20_000;
 const LEASE_RETRY_SECONDS = 120;
-const MEAL_TYPES = new Set(['早餐', '午餐', '晚餐', '加餐']);
+const MEAL_TYPES = new Set(["早餐", "午餐", "晚餐", "加餐"]);
 const JSON_HEADERS = {
-  'Content-Type': 'application/json; charset=utf-8',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  "Content-Type": "application/json; charset=utf-8",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 export type ValidatedAiItem = {
@@ -30,9 +31,9 @@ type ValidatedAiResponse = {
 };
 
 type ClaimState =
-  | { status: 'CLAIMED'; claimToken: string; response: null }
-  | { status: 'IN_PROGRESS'; claimToken: null; response: null }
-  | { status: 'CACHED'; claimToken: null; response: unknown };
+  | { status: "CLAIMED"; claimToken: string; response: null }
+  | { status: "IN_PROGRESS"; claimToken: null; response: null }
+  | { status: "CACHED"; claimToken: null; response: unknown };
 
 type EnvironmentReader = (name: string) => string | undefined;
 export type NutritionAiClientFactory = typeof createClient;
@@ -41,9 +42,11 @@ export function parseDefaultKey(value: string | undefined): string | null {
   if (!value) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
     const defaultKey = (parsed as Record<string, unknown>).default;
-    return typeof defaultKey === 'string' && defaultKey ? defaultKey : null;
+    return typeof defaultKey === "string" && defaultKey ? defaultKey : null;
   } catch {
     return null;
   }
@@ -54,37 +57,45 @@ export function parseRequestBody(value: unknown): {
   defaultMealType: string;
   clientRequestId: string;
 } {
-  if (!value || typeof value !== 'object') throw new Error('INVALID_BODY');
+  if (!value || typeof value !== "object") throw new Error("INVALID_BODY");
   const body = value as Record<string, unknown>;
-  const text = typeof body.text === 'string' ? body.text.trim() : '';
-  const defaultMealType =
-    typeof body.defaultMealType === 'string' ? body.defaultMealType : '加餐';
-  const clientRequestId =
-    typeof body.clientRequestId === 'string' ? body.clientRequestId.trim() : '';
-  if (!text || text.length > MAX_TEXT_LENGTH) throw new Error('INVALID_TEXT');
-  if (!MEAL_TYPES.has(defaultMealType)) throw new Error('INVALID_MEAL_TYPE');
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  const defaultMealType = typeof body.defaultMealType === "string"
+    ? body.defaultMealType
+    : "加餐";
+  const clientRequestId = typeof body.clientRequestId === "string"
+    ? body.clientRequestId.trim()
+    : "";
+  if (!text || text.length > MAX_TEXT_LENGTH) throw new Error("INVALID_TEXT");
+  if (!MEAL_TYPES.has(defaultMealType)) throw new Error("INVALID_MEAL_TYPE");
   if (!clientRequestId || clientRequestId.length > 128) {
-    throw new Error('INVALID_REQUEST_ID');
+    throw new Error("INVALID_REQUEST_ID");
   }
   return { text, defaultMealType, clientRequestId };
 }
 
 export function validateAiItems(value: unknown): ValidatedAiItem[] {
+  const objectValue =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
   const rawItems = Array.isArray(value)
     ? value
-    : value && typeof value === 'object' && Array.isArray((value as any).items)
-    ? (value as any).items
+    : objectValue && Array.isArray(objectValue.items)
+    ? objectValue.items
     : null;
   if (!rawItems || rawItems.length === 0 || rawItems.length > 30) {
-    throw new Error('INVALID_PROVIDER_RESPONSE');
+    throw new Error("INVALID_PROVIDER_RESPONSE");
   }
 
   return rawItems.map((raw: unknown) => {
-    if (!raw || typeof raw !== 'object') throw new Error('INVALID_PROVIDER_RESPONSE');
+    if (!raw || typeof raw !== "object") {
+      throw new Error("INVALID_PROVIDER_RESPONSE");
+    }
     const item = raw as Record<string, unknown>;
-    const name = typeof item.name === 'string' ? item.name.trim() : '';
-    const unit = typeof item.unit === 'string' ? item.unit.trim() : '';
-    const mealType = typeof item.mealType === 'string' ? item.mealType : '';
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    const unit = typeof item.unit === "string" ? item.unit.trim() : "";
+    const mealType = typeof item.mealType === "string" ? item.mealType : "";
     const amount = Number(item.amount);
     const kcal = Number(item.kcal);
     const protein = Number(item.protein);
@@ -105,22 +116,22 @@ export function validateAiItems(value: unknown): ValidatedAiItem[] {
       !Number.isFinite(fat) ||
       fat < 0
     ) {
-      throw new Error('INVALID_PROVIDER_RESPONSE');
+      throw new Error("INVALID_PROVIDER_RESPONSE");
     }
     return { name, amount, unit, kcal, protein, carbs, fat, mealType };
   });
 }
 
 export function validateCachedResponse(value: unknown): ValidatedAiResponse {
-  if (!value || typeof value !== 'object') {
-    throw new Error('INVALID_CACHED_RESPONSE');
+  if (!value || typeof value !== "object") {
+    throw new Error("INVALID_CACHED_RESPONSE");
   }
   const response = value as Record<string, unknown>;
-  if (typeof response.requestId !== 'string' || !response.requestId) {
-    throw new Error('INVALID_CACHED_RESPONSE');
+  if (typeof response.requestId !== "string" || !response.requestId) {
+    throw new Error("INVALID_CACHED_RESPONSE");
   }
-  if (typeof response.provider !== 'string' || !response.provider) {
-    throw new Error('INVALID_CACHED_RESPONSE');
+  if (typeof response.provider !== "string" || !response.provider) {
+    throw new Error("INVALID_CACHED_RESPONSE");
   }
   return {
     items: validateAiItems(response.items),
@@ -130,18 +141,20 @@ export function validateCachedResponse(value: unknown): ValidatedAiResponse {
 }
 
 export function parseClaimState(value: unknown): ClaimState {
-  if (!value || typeof value !== 'object') throw new Error('INVALID_CLAIM_STATE');
+  if (!value || typeof value !== "object") {
+    throw new Error("INVALID_CLAIM_STATE");
+  }
   const state = value as Record<string, unknown>;
-  if (state.status === 'CLAIMED' && typeof state.claimToken === 'string') {
-    return { status: 'CLAIMED', claimToken: state.claimToken, response: null };
+  if (state.status === "CLAIMED" && typeof state.claimToken === "string") {
+    return { status: "CLAIMED", claimToken: state.claimToken, response: null };
   }
-  if (state.status === 'IN_PROGRESS') {
-    return { status: 'IN_PROGRESS', claimToken: null, response: null };
+  if (state.status === "IN_PROGRESS") {
+    return { status: "IN_PROGRESS", claimToken: null, response: null };
   }
-  if (state.status === 'CACHED') {
-    return { status: 'CACHED', claimToken: null, response: state.response };
+  if (state.status === "CACHED") {
+    return { status: "CACHED", claimToken: null, response: state.response };
   }
-  throw new Error('INVALID_CLAIM_STATE');
+  throw new Error("INVALID_CLAIM_STATE");
 }
 
 function responseBody(body: Record<string, unknown>, status: number): Response {
@@ -152,10 +165,15 @@ function errorResponse(
   code: string,
   message: string,
   status: number,
-  requestId = '',
+  requestId = "",
   details: Record<string, unknown> = {},
 ) {
-  return responseBody({ code, message, ...details, ...(requestId ? { requestId } : {}) }, status);
+  return responseBody({
+    code,
+    message,
+    ...details,
+    ...(requestId ? { requestId } : {}),
+  }, status);
 }
 
 function stripFence(value: string): string {
@@ -169,60 +187,83 @@ export function createNutritionAiHandler(
   readEnv: EnvironmentReader = (name) => Deno.env.get(name),
 ): (request: Request) => Promise<Response> {
   return async (request: Request) => {
-    if (request.method === 'OPTIONS') {
+    if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: JSON_HEADERS });
     }
-    if (request.method !== 'POST') {
-      return errorResponse('METHOD_NOT_ALLOWED', '仅支持 POST 请求', 405);
+    if (request.method !== "POST") {
+      return errorResponse("METHOD_NOT_ALLOWED", "仅支持 POST 请求", 405);
     }
 
     const requestId = crypto.randomUUID();
-    const authHeader = request.headers.get('authorization') ?? '';
-    const token = authHeader.startsWith('Bearer ')
-      ? authHeader.slice('Bearer '.length).trim()
-      : '';
-    if (!token) return errorResponse('UNAUTHORIZED', '请先登录', 401, requestId);
+    const authHeader = request.headers.get("authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : "";
+    if (!token) {
+      return errorResponse("UNAUTHORIZED", "请先登录", 401, requestId);
+    }
 
-    const supabaseUrl = readEnv('SUPABASE_URL') ?? '';
-    const publishableKey =
-      readEnv('SUPABASE_ANON_KEY') ??
-      parseDefaultKey(readEnv('SUPABASE_PUBLISHABLE_KEYS'));
-    const secretKey =
-      readEnv('SUPABASE_SERVICE_ROLE_KEY') ??
-      parseDefaultKey(readEnv('SUPABASE_SECRET_KEYS'));
+    const supabaseUrl = readEnv("SUPABASE_URL") ?? "";
+    const publishableKey = readEnv("SUPABASE_ANON_KEY") ??
+      parseDefaultKey(readEnv("SUPABASE_PUBLISHABLE_KEYS"));
+    const secretKey = readEnv("SUPABASE_SERVICE_ROLE_KEY") ??
+      parseDefaultKey(readEnv("SUPABASE_SECRET_KEYS"));
     if (!publishableKey || !secretKey) {
-      return errorResponse('CONFIGURATION_ERROR', '服务配置错误', 500, requestId);
+      return errorResponse(
+        "CONFIGURATION_ERROR",
+        "服务配置错误",
+        500,
+        requestId,
+      );
     }
     const userClient = clientFactory(supabaseUrl, publishableKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
-    const { data: authData, error: authError } = await userClient.auth.getUser(token);
+    const { data: authData, error: authError } = await userClient.auth.getUser(
+      token,
+    );
     const userId = authData.user?.id;
-    if (authError || !userId) return errorResponse('UNAUTHORIZED', '登录状态无效', 401, requestId);
+    if (authError || !userId) {
+      return errorResponse("UNAUTHORIZED", "登录状态无效", 401, requestId);
+    }
 
-    let body: { text: string; defaultMealType: string; clientRequestId: string };
+    let body: {
+      text: string;
+      defaultMealType: string;
+      clientRequestId: string;
+    };
     try {
       const rawBody = await request.text();
       if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
-        return errorResponse('REQUEST_TOO_LARGE', '请求内容过大', 413, requestId);
+        return errorResponse(
+          "REQUEST_TOO_LARGE",
+          "请求内容过大",
+          413,
+          requestId,
+        );
       }
       body = parseRequestBody(JSON.parse(rawBody));
     } catch (error) {
-      const rawCode = error instanceof Error ? error.message : 'INVALID_BODY';
+      const rawCode = error instanceof Error ? error.message : "INVALID_BODY";
       const code = new Set([
-        'INVALID_BODY',
-        'INVALID_TEXT',
-        'INVALID_MEAL_TYPE',
-        'INVALID_REQUEST_ID',
-      ]).has(rawCode)
+          "INVALID_BODY",
+          "INVALID_TEXT",
+          "INVALID_MEAL_TYPE",
+          "INVALID_REQUEST_ID",
+        ]).has(rawCode)
         ? rawCode
-        : 'INVALID_BODY';
-      return errorResponse(code, '请求参数无效', 400, requestId);
+        : "INVALID_BODY";
+      return errorResponse(code, "请求参数无效", 400, requestId);
     }
 
-    const providerKey = readEnv('DEEPSEEK_API_KEY');
+    const providerKey = readEnv("DEEPSEEK_API_KEY");
     if (!providerKey) {
-      return errorResponse('AI_NOT_CONFIGURED', 'AI 服务暂未配置', 503, requestId);
+      return errorResponse(
+        "AI_NOT_CONFIGURED",
+        "AI 服务暂未配置",
+        503,
+        requestId,
+      );
     }
 
     const adminClient = clientFactory(supabaseUrl, secretKey, {
@@ -230,33 +271,37 @@ export function createNutritionAiHandler(
     });
 
     const readCached = async (): Promise<ValidatedAiResponse | null> => {
-      const cached = await adminClient.rpc('nutrition_ai_get_cached_response', {
+      const cached = await adminClient.rpc("nutrition_ai_get_cached_response", {
         p_user_id: userId,
         p_request_id: body.clientRequestId,
       });
       if (cached.error) {
-        console.error(JSON.stringify({ code: 'CACHE_READ_FAILED', requestId }));
-        throw new Error('CACHE_READ_FAILED');
+        console.error(JSON.stringify({ code: "CACHE_READ_FAILED", requestId }));
+        throw new Error("CACHE_READ_FAILED");
       }
       if (cached.data == null) return null;
       try {
         return validateCachedResponse(cached.data);
       } catch {
-        console.error(JSON.stringify({ code: 'CACHE_SCHEMA_INVALID', requestId }));
-        throw new Error('CACHE_SCHEMA_INVALID');
+        console.error(
+          JSON.stringify({ code: "CACHE_SCHEMA_INVALID", requestId }),
+        );
+        throw new Error("CACHE_SCHEMA_INVALID");
       }
     };
 
     let claimToken: string | null = null;
     const releaseOperation = async () => {
       if (!claimToken) return;
-      const released = await adminClient.rpc('nutrition_ai_release_operation', {
+      const released = await adminClient.rpc("nutrition_ai_release_operation", {
         p_user_id: userId,
         p_request_id: body.clientRequestId,
         p_claim_token: claimToken,
       });
       if (released.error) {
-        console.error(JSON.stringify({ code: 'IDEMPOTENCY_RELEASE_FAILED', requestId }));
+        console.error(
+          JSON.stringify({ code: "IDEMPOTENCY_RELEASE_FAILED", requestId }),
+        );
       }
     };
 
@@ -264,23 +309,33 @@ export function createNutritionAiHandler(
       const cached = await readCached();
       if (cached) return responseBody(cached, 200);
 
-      const claimResult = await adminClient.rpc('nutrition_ai_claim_operation', {
-        p_user_id: userId,
-        p_request_id: body.clientRequestId,
-      });
+      const claimResult = await adminClient.rpc(
+        "nutrition_ai_claim_operation",
+        {
+          p_user_id: userId,
+          p_request_id: body.clientRequestId,
+        },
+      );
       if (claimResult.error) {
-        console.error(JSON.stringify({ code: 'IDEMPOTENCY_CLAIM_FAILED', requestId }));
-        return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+        console.error(
+          JSON.stringify({ code: "IDEMPOTENCY_CLAIM_FAILED", requestId }),
+        );
+        return errorResponse(
+          "SERVICE_UNAVAILABLE",
+          "AI 服务暂不可用",
+          503,
+          requestId,
+        );
       }
       const claim = parseClaimState(claimResult.data);
-      if (claim.status === 'CACHED') {
-        if (claim.response == null) throw new Error('CACHE_SCHEMA_INVALID');
+      if (claim.status === "CACHED") {
+        if (claim.response == null) throw new Error("CACHE_SCHEMA_INVALID");
         return responseBody(validateCachedResponse(claim.response), 200);
       }
-      if (claim.status === 'IN_PROGRESS') {
+      if (claim.status === "IN_PROGRESS") {
         return errorResponse(
-          'REQUEST_IN_PROGRESS',
-          '请求正在处理中',
+          "REQUEST_IN_PROGRESS",
+          "请求正在处理中",
           409,
           requestId,
           { retryAfterSeconds: LEASE_RETRY_SECONDS },
@@ -288,57 +343,90 @@ export function createNutritionAiHandler(
       }
       claimToken = claim.claimToken;
 
-      const quota = await adminClient.rpc('consume_ai_quota_for_user', {
+      const quota = await adminClient.rpc("consume_ai_quota_for_user", {
         p_user_id: userId,
         p_request_id: body.clientRequestId,
       });
       if (quota.error) {
         await releaseOperation();
-        console.error(JSON.stringify({ code: 'QUOTA_CHECK_FAILED', requestId }));
-        return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+        console.error(
+          JSON.stringify({ code: "QUOTA_CHECK_FAILED", requestId }),
+        );
+        return errorResponse(
+          "SERVICE_UNAVAILABLE",
+          "AI 服务暂不可用",
+          503,
+          requestId,
+        );
       }
       if (quota.data !== true) {
         await releaseOperation();
-        return errorResponse('RATE_LIMITED', '今日 AI 解析次数已用完', 429, requestId);
+        return errorResponse(
+          "RATE_LIMITED",
+          "今日 AI 解析次数已用完",
+          429,
+          requestId,
+        );
       }
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
       try {
-        const providerResponse = await fetchImpl('https://api.deepseek.com/v1/chat/completions', {
-          method: 'POST',
-          signal: controller.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${providerKey}`,
+        const providerResponse = await fetchImpl(
+          "https://api.deepseek.com/v1/chat/completions",
+          {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${providerKey}`,
+            },
+            body: JSON.stringify({
+              model: "deepseek-v4-flash",
+              temperature: 0.1,
+              response_format: { type: "json_object" },
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    '你是严格的营养记录 JSON 解析器，只返回 {"items":[]}。',
+                },
+                {
+                  role: "user",
+                  content:
+                    `将以下饮食描述解析为 JSON。每项必须包含 name, amount, unit, kcal, protein, carbs, fat, mealType；mealType 只能是早餐、午餐、晚餐、加餐；未识别餐次使用${body.defaultMealType}。用户描述：${body.text}`,
+                },
+              ],
+            }),
           },
-          body: JSON.stringify({
-            model: 'deepseek-chat',
-            temperature: 0.1,
-            response_format: { type: 'json_object' },
-            messages: [
-              { role: 'system', content: '你是严格的营养记录 JSON 解析器，只返回 {"items":[]}。' },
-              {
-                role: 'user',
-                content: `将以下饮食描述解析为 JSON。每项必须包含 name, amount, unit, kcal, protein, carbs, fat, mealType；mealType 只能是早餐、午餐、晚餐、加餐；未识别餐次使用${body.defaultMealType}。用户描述：${body.text}`,
-              },
-            ],
-          }),
-        });
+        );
         if (!providerResponse.ok) {
           await releaseOperation();
-          console.error(JSON.stringify({ code: 'PROVIDER_HTTP_ERROR', status: providerResponse.status, requestId }));
-          return errorResponse('AI_PROVIDER_ERROR', 'AI 解析暂时失败，请稍后重试', 502, requestId);
+          console.error(
+            JSON.stringify({
+              code: "PROVIDER_HTTP_ERROR",
+              status: providerResponse.status,
+              requestId,
+            }),
+          );
+          return errorResponse(
+            "AI_PROVIDER_ERROR",
+            "AI 解析暂时失败，请稍后重试",
+            502,
+            requestId,
+          );
         }
         const providerJson = await providerResponse.json();
         const content = providerJson?.choices?.[0]?.message?.content;
-        if (typeof content !== 'string') throw new Error('INVALID_PROVIDER_RESPONSE');
+        if (typeof content !== "string") {
+          throw new Error("INVALID_PROVIDER_RESPONSE");
+        }
         const result: ValidatedAiResponse = {
           items: validateAiItems(JSON.parse(stripFence(content))),
           requestId,
-          provider: 'deepseek',
+          provider: "deepseek",
         };
-        const saved = await adminClient.rpc('nutrition_ai_save_response', {
+        const saved = await adminClient.rpc("nutrition_ai_save_response", {
           p_user_id: userId,
           p_request_id: body.clientRequestId,
           p_claim_token: claimToken,
@@ -348,23 +436,48 @@ export function createNutritionAiHandler(
           const cachedAfterRace = await readCached();
           if (cachedAfterRace) return responseBody(cachedAfterRace, 200);
           await releaseOperation();
-          console.error(JSON.stringify({ code: 'IDEMPOTENCY_SAVE_FAILED', requestId }));
-          return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+          console.error(
+            JSON.stringify({ code: "IDEMPOTENCY_SAVE_FAILED", requestId }),
+          );
+          return errorResponse(
+            "SERVICE_UNAVAILABLE",
+            "AI 服务暂不可用",
+            503,
+            requestId,
+          );
         }
         return responseBody(result, 200);
       } catch (error) {
-        if (error instanceof Error && error.message === 'CACHE_SCHEMA_INVALID') {
-          return errorResponse('SERVICE_UNAVAILABLE', '缓存内容无效', 503, requestId);
+        if (
+          error instanceof Error && error.message === "CACHE_SCHEMA_INVALID"
+        ) {
+          return errorResponse(
+            "SERVICE_UNAVAILABLE",
+            "缓存内容无效",
+            503,
+            requestId,
+          );
         }
-        if (error instanceof Error && error.message === 'CACHE_READ_FAILED') {
-          return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+        if (error instanceof Error && error.message === "CACHE_READ_FAILED") {
+          return errorResponse(
+            "SERVICE_UNAVAILABLE",
+            "AI 服务暂不可用",
+            503,
+            requestId,
+          );
         }
         await releaseOperation();
-        const isTimeout = error instanceof DOMException && error.name === 'AbortError';
-        console.error(JSON.stringify({ code: isTimeout ? 'PROVIDER_TIMEOUT' : 'INVALID_PROVIDER_RESPONSE', requestId }));
+        const isTimeout = error instanceof DOMException &&
+          error.name === "AbortError";
+        console.error(
+          JSON.stringify({
+            code: isTimeout ? "PROVIDER_TIMEOUT" : "INVALID_PROVIDER_RESPONSE",
+            requestId,
+          }),
+        );
         return errorResponse(
-          isTimeout ? 'AI_TIMEOUT' : 'INVALID_PROVIDER_RESPONSE',
-          isTimeout ? 'AI 请求超时，请稍后重试' : 'AI 返回内容无效，请稍后重试',
+          isTimeout ? "AI_TIMEOUT" : "INVALID_PROVIDER_RESPONSE",
+          isTimeout ? "AI 请求超时，请稍后重试" : "AI 返回内容无效，请稍后重试",
           502,
           requestId,
         );
@@ -372,15 +485,30 @@ export function createNutritionAiHandler(
         clearTimeout(timeout);
       }
     } catch (error) {
-      if (error instanceof Error && error.message === 'CACHE_SCHEMA_INVALID') {
-        return errorResponse('SERVICE_UNAVAILABLE', '缓存内容无效', 503, requestId);
+      if (error instanceof Error && error.message === "CACHE_SCHEMA_INVALID") {
+        return errorResponse(
+          "SERVICE_UNAVAILABLE",
+          "缓存内容无效",
+          503,
+          requestId,
+        );
       }
-      if (error instanceof Error && error.message === 'CACHE_READ_FAILED') {
-        return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+      if (error instanceof Error && error.message === "CACHE_READ_FAILED") {
+        return errorResponse(
+          "SERVICE_UNAVAILABLE",
+          "AI 服务暂不可用",
+          503,
+          requestId,
+        );
       }
       await releaseOperation();
-      console.error(JSON.stringify({ code: 'IDEMPOTENCY_FAILED', requestId }));
-      return errorResponse('SERVICE_UNAVAILABLE', 'AI 服务暂不可用', 503, requestId);
+      console.error(JSON.stringify({ code: "IDEMPOTENCY_FAILED", requestId }));
+      return errorResponse(
+        "SERVICE_UNAVAILABLE",
+        "AI 服务暂不可用",
+        503,
+        requestId,
+      );
     }
   };
 }

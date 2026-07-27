@@ -313,7 +313,7 @@ export function createNutritionAiHandler(
             Authorization: `Bearer ${providerKey}`,
           },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: 'deepseek-v4-flash',
             temperature: 0.1,
             response_format: { type: 'json_object' },
             messages: [

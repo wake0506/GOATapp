@@ -146,32 +146,32 @@ security invoker
 set search_path = public
 stable
 as $$
-  with current_user as (select auth.uid() as id),
+  with current_user_data as (select auth.uid() as id),
   diet as (
     select coalesce(sum(d.kcal), 0) as calories_in,
            coalesce(sum(d.p), 0) as protein_g,
            coalesce(sum(d.c), 0) as carbs_g,
            coalesce(sum(d.f), 0) as fat_g
-    from public.diet_logs d join current_user u on d.user_id = u.id
+    from public.diet_logs d join current_user_data u on d.user_id = u.id
     where d.date = p_date and d.deleted_at is null
   ), exercise as (
     select coalesce(sum(e.kcal), 0) as calories_burned, count(*) as exercise_count
-    from public.exercise_logs e join current_user u on e.user_id = u.id
+    from public.exercise_logs e join current_user_data u on e.user_id = u.id
     where e.date = p_date and e.deleted_at is null
   ), water as (
     select coalesce(sum(w.amount_ml), 0)::bigint as water_ml
-    from public.water_intake_records w join current_user u on w.user_id = u.id
+    from public.water_intake_records w join current_user_data u on w.user_id = u.id
     where w.date = p_date and w.deleted_at is null
   ), weight as (
     select coalesce(max(b.weight_kg), 0) as weight_kg
-    from public.body_weight_logs b join current_user u on b.user_id = u.id
+    from public.body_weight_logs b join current_user_data u on b.user_id = u.id
     where b.date = p_date and b.deleted_at is null
   ), training as (
     select count(*)::bigint as training_count,
            coalesce(sum(x.volume), 0) as training_volume_kg,
            coalesce(sum(x.completed_sets), 0)::bigint as completed_sets
     from public.training_sessions t
-    join current_user u on t.user_id = u.id
+    join current_user_data u on t.user_id = u.id
     cross join lateral (
       select coalesce(sum(coalesce((s.value->>'weight')::numeric, 0) * coalesce((s.value->>'reps')::numeric, 0)), 0) as volume,
              count(s.value) filter (where coalesce((s.value->>'reps')::integer, 0) > 0) as completed_sets
@@ -207,13 +207,13 @@ security invoker
 set search_path = public
 stable
 as $$
-  with current_user as (select auth.uid() as id),
+  with current_user_data as (select auth.uid() as id),
   day_rows as (
     select * from generate_series(p_start_date, p_start_date + 6, interval '1 day') d(day)
   ), daily as (
     select s.* from day_rows r cross join lateral public.get_daily_summary(r.day::date) s
   ), profile as (
-    select target_p, target_c, target_f from public.user_profiles p join current_user u on p.id = u.id
+    select target_p, target_c, target_f from public.user_profiles p join current_user_data u on p.id = u.id
   ), macros as (
     select avg(case when profile.target_p > 0 then d.protein_g / profile.target_p else null end) +
            avg(case when profile.target_c > 0 then d.carbs_g / profile.target_c else null end) +

@@ -34,3 +34,6 @@ enabled = false
 
 [functions.nutrition-ai]
 verify_jwt = true
+
+[functions.coach-ai]
+verify_jwt = true

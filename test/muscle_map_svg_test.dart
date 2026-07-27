@@ -30,6 +30,39 @@ void main() {
   test('front and back assets keep cached continuous body geometry', () {
     expect(MuscleSvgAsset.frontBody.computeMetrics().length, 1);
     expect(MuscleSvgAsset.backBody.computeMetrics().length, 1);
+    expect(identical(MuscleSvgAsset.frontBody, MuscleSvgAsset.backBody), false);
+    expect(MuscleSvgAsset.frontBody.getBounds().height, greaterThan(690));
+    expect(MuscleSvgAsset.backBody.getBounds().height, greaterThan(690));
+    expect(MuscleSvgAsset.frontDetails.length, greaterThanOrEqualTo(15));
+    expect(MuscleSvgAsset.backDetails.length, greaterThanOrEqualTo(15));
+    expect(MuscleSvgAsset.frontConnectors, isNotEmpty);
+    expect(MuscleSvgAsset.backConnectors, isNotEmpty);
+    expect(MuscleSvgAsset.frontSurfaceParts.length, greaterThanOrEqualTo(20));
+    expect(MuscleSvgAsset.backSurfaceParts.length, greaterThanOrEqualTo(20));
+    expect(
+      MuscleSvgAsset.frontSurfaceDetails.every(
+        (path) => path.getBounds().top > 100,
+      ),
+      true,
+    );
+    expect(
+      MuscleSvgAsset.backSurfaceDetails.every(
+        (path) => path.getBounds().top > 100,
+      ),
+      true,
+    );
+    for (final path in [
+      MuscleSvgAsset.frontHead,
+      MuscleSvgAsset.backHead,
+      ...MuscleSvgAsset.frontSurfaceParts,
+      ...MuscleSvgAsset.backSurfaceParts,
+    ]) {
+      final bounds = path.getBounds();
+      expect(bounds.left, greaterThanOrEqualTo(0));
+      expect(bounds.top, greaterThanOrEqualTo(0));
+      expect(bounds.right, lessThanOrEqualTo(MuscleSvgAsset.viewBox.width));
+      expect(bounds.bottom, lessThanOrEqualTo(MuscleSvgAsset.viewBox.height));
+    }
     expect(
       identical(MuscleSvgAsset.frontPaths, MuscleSvgAsset.frontPaths),
       true,

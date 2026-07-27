@@ -102,53 +102,125 @@ class SvgMuscleMapPainter extends CustomPainter {
     canvas.scale(scene.scale);
 
     final body = MuscleSvgAsset.bodyFor(view);
-    canvas.drawShadow(body, const Color(0x262D4540), 13, false);
-
-    final bodyPaint = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFF8FAF9), Color(0xFFE2E8E5)],
-        stops: [0, 1],
-      ).createShader(const Rect.fromLTWH(0, 0, 320, 720));
-    canvas.drawPath(body, bodyPaint);
-
     canvas.save();
     canvas.clipPath(body);
-    canvas.drawOval(
-      const Rect.fromLTWH(94, 98, 132, 248),
-      Paint()
-        ..shader = const RadialGradient(
-          center: Alignment(-0.38, -0.42),
-          radius: 1.08,
-          colors: [Color(0x72FFFFFF), Color(0x00FFFFFF)],
-        ).createShader(const Rect.fromLTWH(80, 80, 160, 290)),
-    );
-    canvas.restore();
+
+    _paintNeutralPart(canvas, MuscleSvgAsset.headFor(view), isHead: true);
+    for (final part in MuscleSvgAsset.coreSurfacePartsFor(view)) {
+      _paintNeutralPart(canvas, part);
+    }
+    for (final part in MuscleSvgAsset.handPartsFor(view)) {
+      _paintNeutralPart(canvas, part);
+    }
+    for (final part in MuscleSvgAsset.footPartsFor(view)) {
+      _paintNeutralPart(canvas, part);
+    }
+
+    for (final tendon in MuscleSvgAsset.tendonsFor(view)) {
+      final bounds = tendon.getBounds();
+      canvas.drawPath(
+        tendon,
+        Paint()
+          ..shader = const RadialGradient(
+            center: Alignment(-0.28, -0.4),
+            radius: 1.08,
+            colors: [Color(0xFFF1F5F3), Color(0xFFD3DEDA), Color(0xFFB5C4BF)],
+            stops: [0, 0.64, 1],
+          ).createShader(bounds),
+      );
+      canvas.drawPath(
+        tendon,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.24
+          ..strokeJoin = StrokeJoin.round
+          ..color = const Color(0x36516660),
+      );
+    }
 
     for (final musclePath in scene.paths) {
       _paintRegion(canvas, musclePath);
     }
 
+    final connectorShadow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.2
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0x32C7D2CE);
+    final connectorHighlight = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.38
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0x54FFFFFF);
+    for (final connector in MuscleSvgAsset.connectorsFor(view)) {
+      canvas.drawPath(connector, connectorShadow);
+      canvas.drawPath(connector, connectorHighlight);
+    }
+    canvas.restore();
+
     final detailPaint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.9
+      ..strokeWidth = 0.52
       ..strokeCap = StrokeCap.round
-      ..color = const Color(0x344A625C);
-    for (final detail in MuscleSvgAsset.detailsFor(view)) {
+      ..strokeJoin = StrokeJoin.round
+      ..color = const Color(0x58485E58);
+    for (final detail in MuscleSvgAsset.surfaceDetailsFor(view)) {
       canvas.drawPath(detail, detailPaint);
     }
 
-    canvas.drawPath(
-      body,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.1
-        ..strokeJoin = StrokeJoin.round
-        ..color = const Color(0xA25B706A),
-    );
+    _paintOutline(canvas, body);
 
     canvas.restore();
+  }
+
+  void _paintOutline(Canvas canvas, Path path) {
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round
+        ..color = const Color(0x1F3B514B),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.94
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round
+        ..color = const Color(0xA0475D57),
+    );
+  }
+
+  void _paintNeutralPart(Canvas canvas, Path path, {bool isHead = false}) {
+    final bounds = path.getBounds();
+    if (isHead) canvas.drawShadow(path, const Color(0x18263D38), 5, false);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = RadialGradient(
+          center: isHead
+              ? const Alignment(-0.28, -0.34)
+              : const Alignment(-0.34, -0.42),
+          radius: 1.08,
+          colors: const [
+            Color(0xFFF2F6F4),
+            Color(0xFFD5E0DC),
+            Color(0xFFB5C4BF),
+          ],
+          stops: const [0, 0.62, 1],
+        ).createShader(bounds),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = isHead ? 0.24 : 0.4
+        ..strokeJoin = StrokeJoin.round
+        ..color = const Color(0x4A516660),
+    );
   }
 
   void _paintRegion(Canvas canvas, SvgMusclePath musclePath) {
@@ -171,15 +243,15 @@ class SvgMuscleMapPainter extends CustomPainter {
     }
 
     final fill = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
+      ..shader = RadialGradient(
+        center: const Alignment(-0.32, -0.38),
+        radius: 1.06,
         colors: [
-          Color.lerp(color, Colors.white, selected ? 0.18 : 0.12)!,
+          Color.lerp(color, Colors.white, selected ? 0.32 : 0.26)!,
           color,
-          Color.lerp(color, const Color(0xFF173D36), selected ? 0.14 : 0.06)!,
+          Color.lerp(color, const Color(0xFF173D36), selected ? 0.2 : 0.13)!,
         ],
-        stops: const [0, 0.54, 1],
+        stops: const [0, 0.56, 1],
       ).createShader(bounds);
     canvas.drawPath(musclePath.path, fill);
 
@@ -187,11 +259,11 @@ class SvgMuscleMapPainter extends CustomPainter {
       musclePath.path,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = selected ? 1.55 : 0.72
+        ..strokeWidth = selected ? 1.35 : 0.52
         ..strokeJoin = StrokeJoin.round
         ..color = selected
             ? Color.lerp(primaryColor, const Color(0xFF004F50), 0.25)!
-            : const Color(0x32475F59),
+            : const Color(0x58516660),
     );
 
     if (selected) {

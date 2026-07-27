@@ -33,7 +33,9 @@ function Invoke-SafeHttp {
       UseBasicParsing = $true
     }
     if ($PSBoundParameters.ContainsKey('Body')) {
-      $arguments.Body = $Body
+      # Windows PowerShell otherwise sends non-ASCII JSON through the system
+      # code page; nutrition meal types are part of the UTF-8 API contract.
+      $arguments.Body = [System.Text.Encoding]::UTF8.GetBytes($Body)
       $arguments.ContentType = $ContentType
     }
     $response = Invoke-WebRequest @arguments
@@ -429,7 +431,7 @@ try {
     -Headers @{ apikey = $anonKey; Authorization = "Bearer $token1" } `
     -Body (@{
       text = 'rice and eggs'
-      defaultMealType = 'breakfast'
+      defaultMealType = (-join ([char]0x65e9, [char]0x9910))
       clientRequestId = $nutritionRequestId
     } | ConvertTo-Json -Compress)
   $nutritionJson = $null
@@ -446,7 +448,7 @@ try {
     -Headers @{ apikey = $anonKey; Authorization = "Bearer $token1" } `
     -Body (@{
       text = 'rice and eggs'
-      defaultMealType = 'breakfast'
+      defaultMealType = (-join ([char]0x65e9, [char]0x9910))
       clientRequestId = $nutritionRequestId
     } | ConvertTo-Json -Compress)
   Add-Check 'nutrition-ai duplicate request returns the same result' (

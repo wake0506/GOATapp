@@ -21,7 +21,9 @@ Independent test target: ref suffix qasz.
 - Contract Alignment tables (training_templates, ai_memories,
   ai_suggestions, ai_suggestion_feedback): missing.
 - chat_history columns are only user_id uuid NOT NULL and messages text.
-- chat_history.user_id foreign key is not ON DELETE CASCADE.
+- chat_history.user_id has no ON DELETE CASCADE foreign key (the reviewed
+  compatibility precondition permits a missing or non-CASCADE auth.users FK;
+  unknown FK targets remain a STOP condition).
 - Existing chat_history policy is a PUBLIC/ALL policy and fails the client
   permission gate.
 - Migration history relation is unavailable/empty from the linked read-only

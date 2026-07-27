@@ -42,8 +42,9 @@ only in process memory.
     supabase db query --linked "select 1;"
     supabase db query --linked --file .\supabase\contract_alignment\production_preflight_drift_safe.sql
 
-2. STOP unless the baseline is unchanged, the compatibility source hash is
-   recorded, and the preflight findings match the reviewed drift.
+ 2. Continue only when the baseline is unchanged, the compatibility source hash
+    is recorded, and every EXPECTED_DRIFT row exactly matches the reviewed qasz
+    baseline. EXPECTED_DRIFT is not a blanket waiver.
 
 3. Adopt the three already-provisioned historical versions without executing
    their SQL:
@@ -96,7 +97,9 @@ was executed by the dry-run.
 
 ## STOP conditions
 
-Authentication failure, identity ambiguity, unexpected schema or policy,
-orphan rows, data-count change, migration error, any FAIL/REVIEW row, secret
-leakage, or missing qasz evidence. No production migration or Function
-deployment may proceed after a STOP.
+Authentication failure, identity ambiguity, unexpected schema/column/policy/
+function, orphan rows, data-count change, migration error, any FAIL/REVIEW row,
+secret leakage, production ref mismatch, compatibility hash mismatch,
+versioned_sync not false, or a dry-run containing anything besides
+20260727000000. Only the explicitly reviewed EXPECTED_DRIFT rows may remain
+before adoption; no blanket FAIL/REVIEW bypass is permitted.

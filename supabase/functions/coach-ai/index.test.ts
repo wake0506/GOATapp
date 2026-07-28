@@ -2,6 +2,7 @@ import {
   createCoachAiHandler,
   parseCoachRequest,
   parseDefaultKey,
+  parseProviderJson,
   validateCoachResponse,
 } from "./index.ts";
 
@@ -96,6 +97,55 @@ Deno.test("unknown uncertainty is rejected", () => {
       suggestions: [],
       uncertainties: ["madeUp"],
     }, "request-1"), "INVALID_PROVIDER_RESPONSE");
+});
+
+const validProviderJson = {
+  answer: "解释",
+  summary: "摘要",
+  evidenceRefs: ["session:1"],
+  knowledgeRefs: ["kb:1"],
+  suggestions: [{ type: "rest" }],
+  uncertainties: ["partialData"],
+};
+
+Deno.test("provider parser accepts standard JSON", () => {
+  const parsed = parseProviderJson(JSON.stringify(validProviderJson));
+  assert(validateCoachResponse(parsed, "request-standard").answer === "解释");
+});
+
+Deno.test("provider parser accepts json fenced JSON", () => {
+  const fenced = "```json\n" + JSON.stringify(validProviderJson) + "\n```";
+  const parsed = parseProviderJson(fenced);
+  assert(validateCoachResponse(parsed, "request-fenced").summary === "摘要");
+});
+
+Deno.test("provider parser accepts explanatory text around JSON", () => {
+  const parsed = parseProviderJson(
+    `Here is the response:\n${JSON.stringify(validProviderJson)}\nEnd.`,
+  );
+  assert(
+    validateCoachResponse(parsed, "request-prose").provider === "deepseek",
+  );
+});
+
+Deno.test("provider parser rejects missing contract fields", () => {
+  const missing = { ...validProviderJson };
+  delete (missing as { answer?: string }).answer;
+  assertThrows(
+    () =>
+      validateCoachResponse(
+        parseProviderJson(JSON.stringify(missing)),
+        "request-missing",
+      ),
+    "INVALID_PROVIDER_RESPONSE",
+  );
+});
+
+Deno.test("provider parser rejects malformed JSON", () => {
+  assertThrows(
+    () => parseProviderJson('{"answer":'),
+    "INVALID_PROVIDER_RESPONSE",
+  );
 });
 
 Deno.test("missing JWT returns 401 before configuration or provider access", async () => {

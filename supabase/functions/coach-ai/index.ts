@@ -2,6 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const TIMEOUT_MS = 20_000;
+const PROVIDER_MODEL = "deepseek-v4-flash";
+const PROVIDER_ENDPOINT = "https://api.deepseek.com/chat/completions";
 const MAX_REQUEST_ID_LENGTH = 128;
 const MAX_CONTEXT_ITEMS = 50;
 const JSON_HEADERS = {
@@ -142,9 +144,27 @@ function errorResponse(code: string, status: number, requestId = ""): Response {
   return response({ code, ...(requestId ? { requestId } : {}) }, status);
 }
 
-function stripFence(value: string): string {
-  const match = value.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return match?.[1]?.trim() ?? value.trim();
+function logProviderFailure(details: Record<string, unknown>): void {
+  console.error(JSON.stringify({
+    model: PROVIDER_MODEL,
+    endpoint: PROVIDER_ENDPOINT,
+    ...details,
+  }));
+}
+
+export function parseProviderJson(value: string): unknown {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fenced?.[1]?.trim() ?? (() => {
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    return start >= 0 && end > start ? trimmed.slice(start, end + 1) : trimmed;
+  })();
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    throw new Error("INVALID_PROVIDER_RESPONSE");
+  }
 }
 
 function systemPrompt(): string {
@@ -232,7 +252,7 @@ export function createCoachAiHandler(
     const timeout = setTimeout(() => abortController.abort(), TIMEOUT_MS);
     try {
       const providerResponse = await fetchImpl(
-        "https://api.deepseek.com/chat/completions",
+        PROVIDER_ENDPOINT,
         {
           method: "POST",
           headers: {
@@ -240,7 +260,7 @@ export function createCoachAiHandler(
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "deepseek-v4-flash",
+            model: PROVIDER_MODEL,
             response_format: { type: "json_object" },
             temperature: 0.2,
             messages: [
@@ -261,14 +281,25 @@ export function createCoachAiHandler(
         },
       );
       if (!providerResponse.ok) {
-        console.error(JSON.stringify({
+        logProviderFailure({
           requestId: serverRequestId,
           result: "PROVIDER_FAILED",
           status: providerResponse.status,
-        }));
+          failureStage: "provider_http",
+        });
         return errorResponse("AI_UPSTREAM_ERROR", 502, serverRequestId);
       }
-      const envelope = await providerResponse.json() as Record<string, unknown>;
+      let envelope: Record<string, unknown>;
+      try {
+        envelope = await providerResponse.json() as Record<string, unknown>;
+      } catch {
+        logProviderFailure({
+          requestId: serverRequestId,
+          result: "INVALID_PROVIDER_RESPONSE",
+          failureStage: "provider_json_envelope",
+        });
+        throw new Error("INVALID_PROVIDER_RESPONSE");
+      }
       const choices = envelope.choices;
       const firstChoice = Array.isArray(choices) ? choices[0] : null;
       const message = firstChoice &&
@@ -282,12 +313,47 @@ export function createCoachAiHandler(
         ? (message as Record<string, unknown>).content
         : null;
       if (typeof content !== "string") {
+        logProviderFailure({
+          requestId: serverRequestId,
+          result: "INVALID_PROVIDER_RESPONSE",
+          failureStage: "content_extract",
+          responseKeys: Object.keys(envelope).sort(),
+          choicesType: Array.isArray(choices) ? "array" : typeof choices,
+          choicesCount: Array.isArray(choices) ? choices.length : 0,
+          messageType: message === null ? "null" : typeof message,
+          contentType: content === null ? "null" : typeof content,
+        });
         throw new Error("INVALID_PROVIDER_RESPONSE");
       }
-      const validated = validateCoachResponse(
-        JSON.parse(stripFence(content)),
-        body.requestId,
-      );
+      let parsedProvider: unknown;
+      try {
+        parsedProvider = parseProviderJson(content);
+      } catch {
+        logProviderFailure({
+          requestId: serverRequestId,
+          result: "INVALID_PROVIDER_RESPONSE",
+          failureStage: "provider_content_json_parse",
+          contentLength: content.length,
+        });
+        throw new Error("INVALID_PROVIDER_RESPONSE");
+      }
+      let validated: CoachAiResponse;
+      try {
+        validated = validateCoachResponse(parsedProvider, body.requestId);
+      } catch {
+        logProviderFailure({
+          requestId: serverRequestId,
+          result: "INVALID_PROVIDER_RESPONSE",
+          failureStage: "contract_validation",
+          contentLength: content.length,
+          parsedType: parsedProvider === null ? "null" : typeof parsedProvider,
+          parsedKeys: parsedProvider && typeof parsedProvider === "object" &&
+              !Array.isArray(parsedProvider)
+            ? Object.keys(parsedProvider as Record<string, unknown>).sort()
+            : [],
+        });
+        throw new Error("INVALID_PROVIDER_RESPONSE");
+      }
       console.info(JSON.stringify({
         requestId: serverRequestId,
         taskType: body.taskType,

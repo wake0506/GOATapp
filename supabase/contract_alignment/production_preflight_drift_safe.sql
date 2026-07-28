@@ -106,7 +106,8 @@ checks as (
   select
     'versioned_sync'::text,
     case when to_regclass('public.app_feature_flags') is null then 'EXPECTED_DRIFT'
-         else 'PASS' end,
+         when exists (select 1 from public.app_feature_flags where key = 'versioned_sync' and enabled = false) then 'PASS'
+         else 'FAIL' end,
     case when to_regclass('public.app_feature_flags') is null
        then 'feature flag table absent before compatibility migration'
        else 'feature flag table present; versioned_sync must be false' end
